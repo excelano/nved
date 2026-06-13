@@ -1,0 +1,16 @@
+# Built binary at repo root
+/nved
+
+# Go test binaries and coverage
+*.test
+*.out
+coverage.*
+profile.cov
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Scratch fixtures used while dogfooding
+/test.txt
+/test1000.txt
