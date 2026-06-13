@@ -59,6 +59,11 @@ func TestParseAddress(t *testing.T) {
 		{",$", 10, 1, 10, true},
 		{"3,", 10, 3, 10, true},
 		{"$,$", 4, 4, 4, true},
+		{".", 10, 1, 10, true},  // dot is an alias for the comma: all lines
+		{"1.3", 10, 1, 3, true}, // dot range
+		{"3.", 10, 3, 10, true}, // dot to the end
+		{".5", 10, 1, 5, true},  // start to dot
+		{"5.2", 10, 2, 5, true}, // reversed dot range swapped
 		{"abc", 10, 0, 0, false},
 		{"1,x", 10, 0, 0, false},
 	}

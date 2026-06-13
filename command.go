@@ -151,6 +151,7 @@ func printHelp() {
   x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)
 out-of-range numbers clamp to the nearest valid line.
+a . can be used in place of , in any range (easier on the numeric keypad).
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
 Ctrl+Left / Ctrl+Right skip the cursor back / forward by words while editing;
 Page-Up / Page-Down reprint the screenful above / below to climb into that;

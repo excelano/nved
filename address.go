@@ -14,10 +14,14 @@ import (
 // empty side of a comma defaulting to 1 on the left and $ on the right — so "N,"
 // is N to the end and ",N" is the start to N. The "$" terminator still parses
 // ("1,$"), but "1," and "," are the simpler everyday forms.
+//
+// A "." may be typed in place of the "," anywhere — addresses are all digits, so
+// "5.20" reads as "5,20", and a "." sits under the right hand on the numeric
+// keypad where there is no comma.
 func parseAddress(s string, n int) (start, end int, ok bool) {
 	s = strings.TrimSpace(s)
 	left, right := s, s
-	if i := strings.IndexByte(s, ','); i >= 0 {
+	if i := strings.IndexAny(s, ",."); i >= 0 {
 		left, right = s[:i], s[i+1:]
 		if strings.TrimSpace(left) == "" {
 			left = "1"
