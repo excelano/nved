@@ -1,0 +1,36 @@
+name: release
+
+# Triggers on any tag matching v*, e.g. v0.1.0 or v1.0.0-rc1.
+on:
+  push:
+    tags:
+      - "v*"
+
+# goreleaser needs to write to the GitHub release (upload assets), so the
+# job needs `contents: write` on the auto-provided GITHUB_TOKEN.
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # goreleaser uses git history to build the changelog, so we need
+          # full clone history rather than the default shallow one.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
