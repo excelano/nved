@@ -10,14 +10,15 @@ import (
 // nearest valid line and a reversed range is swapped, so a well-formed address
 // never fails; ok is false only when the text is not an address at all.
 //
-// Forms: "5" (one line), "1,3" (range), "," (all), "$" (the last line), with an
-// empty side of a comma defaulting to 1 on the left and $ on the right — so "N,"
-// is N to the end and ",N" is the start to N. The "$" terminator still parses
-// ("1,$"), but "1," and "," are the simpler everyday forms.
+// Forms: "5" (one line), "1.3" (range), "." (all), "$" (the last line), with an
+// empty side of the separator defaulting to 1 on the left and $ on the right — so
+// "N." is N to the end and ".N" is the start to N. The "$" terminator still parses
+// ("1.$"), but "1." and "." are the simpler everyday forms.
 //
-// A "." may be typed in place of the "," anywhere — addresses are all digits, so
-// "5.20" reads as "5,20", and a "." sits under the right hand on the numeric
-// keypad where there is no comma.
+// The "." is the default separator because it sits under the right hand on the
+// numeric keypad where there is no comma; addresses are all digits, so "5.20"
+// reads unambiguously as lines 5 through 20. A "," may be typed in its place
+// anywhere — the two are interchangeable.
 func parseAddress(s string, n int) (start, end int, ok bool) {
 	s = strings.TrimSpace(s)
 	left, right := s, s

@@ -42,19 +42,22 @@ Requires Go 1.25 or newer.
 ## How it works
 
 Start `nved` with a file name, or with no argument for an empty unnamed buffer.
-At the `>` prompt you address lines the way you would in `ed`:
+At the `>` prompt you address lines by number:
 
 | Command   | Effect                                  |
 |-----------|-----------------------------------------|
 | `N`       | print line N                            |
-| `N,M`     | print lines N through M                 |
-| `N,`      | print from line N to the end            |
-| `,N`      | print from the start to line N          |
-| `,`       | print the whole file                    |
+| `N.M`     | print lines N through M                 |
+| `N.`      | print from line N to the end            |
+| `.N`      | print from the start to line N          |
+| `.`       | print the whole file                    |
 | `$`       | print the last line                     |
 | `s [name]`| save; a name is required when unnamed (also `Ctrl+S`) |
-| `x`       | exit without saving, warns once when dirty (also `Ctrl+X`) |
+| `x`       | exit; warns once when dirty (also `Ctrl+X`, `q`, `quit`) |
 | `h`       | show the command and key reference (also `H`, `?`) |
+
+The `.` separator sits under the right hand on the numeric keypad, where there is
+no comma; a `,` works in its place anywhere — the two are interchangeable.
 
 Out-of-range numbers clamp to the nearest valid line. A range taller than the
 terminal prints one screenful from the top; **Page-Up** and **Page-Down** reprint
@@ -66,6 +69,7 @@ The printed block sits just above the prompt. Climb into it to edit:
 - Arrows move the cursor; **Ctrl+Left** / **Ctrl+Right** skip by words; **Home** / **End** and **Ctrl+Home** / **Ctrl+End** jump to the edges.
 - **Enter** splits a line, **Backspace** and **Delete** join lines, typing inserts.
 - **Ctrl+U** undoes the last edit within the session.
+- **Ctrl+S** saves in place without leaving (your cursor stays put); **Ctrl+X** exits — the save and exit chords work while editing, just as at the prompt.
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 
 Long lines are word-wrapped by nved itself, with a continuation indent that lines

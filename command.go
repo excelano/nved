@@ -143,15 +143,15 @@ func (r *repl) printLines(start, end int) {
 func printHelp() {
 	emit(`nved commands
   N           print line N (numbered)
-  N,M         print lines N..M
-  N,   ,N     print N to the end / the start to N
-  ,           print all lines
+  N.M         print lines N..M
+  N.   .N     print N to the end / the start to N
+  .           print all lines
   $           print the last line
   s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
   x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)
 out-of-range numbers clamp to the nearest valid line.
-a . can be used in place of , in any range (easier on the numeric keypad).
+a , can be used in place of . in any range.
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
 Ctrl+Left / Ctrl+Right skip the cursor back / forward by words while editing;
 Page-Up / Page-Down reprint the screenful above / below to climb into that;
