@@ -151,10 +151,18 @@ func (r *repl) run() {
 			return
 		case cmdClimb:
 			switch r.edit(res.climb) {
-			case pageReqUp:
+			case actPageUp:
 				r.pageUp()
-			case pageReqDown:
+			case actPageDown:
 				r.pageDown()
+			case actSave:
+				if r.dispatch("s") {
+					return
+				}
+			case actExit:
+				if r.dispatch("x") {
+					return
+				}
 			}
 		case cmdPageUp:
 			r.pageUp()

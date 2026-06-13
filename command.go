@@ -33,7 +33,7 @@ func (r *repl) dispatch(line string) bool {
 	case "":
 		b.exitArmed = false
 		return false
-	case "x", "exit":
+	case "x", "exit", "q", "quit":
 		if doExit(b) {
 			return true
 		}
@@ -45,7 +45,7 @@ func (r *repl) dispatch(line string) bool {
 		r.last = nil
 		return false
 	}
-	// Any command other than a second consecutive x disarms the exit warning.
+	// Any command other than a repeated exit disarms the exit warning.
 	b.exitArmed = false
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
 		r.printLines(start, end)
@@ -105,7 +105,7 @@ func doExit(b *buffer) bool {
 	}
 	if !b.exitArmed {
 		b.exitArmed = true
-		emit("nved: unsaved changes — x again to discard, or s to save\n")
+		emit("nved: unsaved changes — exit again to discard, or save (s / save / Ctrl+S)\n")
 		return false
 	}
 	return true
@@ -148,13 +148,14 @@ func printHelp() {
   ,           print all lines
   $           print the last line
   s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
-  x  exit     quit without saving       (Ctrl+X)
+  x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)
 out-of-range numbers clamp to the nearest valid line.
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
 Ctrl+Left / Ctrl+Right skip the cursor back / forward by words while editing;
 Page-Up / Page-Down reprint the screenful above / below to climb into that;
-Ctrl+U undoes the last edit (within the session); leave it with Esc, Ctrl+C,
-or by stepping off the bottom (Down) or end (Right).
+Ctrl+S (save in place) and Ctrl+X (exit) work while editing too;
+Ctrl+U undoes the last edit (within the session); leave the editor with Esc,
+Ctrl+C, or by stepping off the bottom (Down) or end (Right).
 `)
 }

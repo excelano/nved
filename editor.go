@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -67,6 +68,10 @@ type editor struct {
 	cy    int // cursor row within the block, 0-based (logical line)
 	cx    int // cursor column within the row, 0-based rune index
 
+	// flash is set while a save confirmation occupies the header row; the next
+	// key restores the normal header.
+	flash bool
+
 	// undos is the per-session undo stack: each entry reverses one edit,
 	// restoring the buffer, line count, cursor, and modified flag. Because
 	// undo is strict LIFO, an entry always runs against the exact buffer state
@@ -75,16 +80,20 @@ type editor struct {
 	undos []func(*editor)
 }
 
-// pageReq is what an editing session asks run() to do once it closes. Page-Up or
-// Page-Down pressed while editing leave the editor (dropping to the command row)
-// and then page from there, so navigation works the same whether the cursor is on
-// the command line or in the block.
-type pageReq int
+// editAction is what an editing session asks run() to do once it closes. Most
+// keys keep editing and return nothing (actNone). Page-Up/Page-Down leave and
+// page from the command row; Ctrl+X leaves and exits; an unnamed Ctrl+S leaves to
+// be prompted for a file name. (A named Ctrl+S saves in place and does NOT leave,
+// so it has no action here.) Routing exit and the unnamed save back through run()
+// keeps one dispatch path shared with the command line.
+type editAction int
 
 const (
-	pageNone pageReq = iota
-	pageReqUp
-	pageReqDown
+	actNone editAction = iota
+	actPageUp
+	actPageDown
+	actSave
+	actExit
 )
 
 // edit runs an editing session, entered by a climb key pressed at the command
@@ -93,7 +102,7 @@ const (
 // reuses the width printLines drew the block at (r.termW) rather than re-reading
 // it, so the editor's layout matches what is already on screen. On return r.last
 // reflects the block's (possibly changed) size.
-func (r *repl) edit(climb key) pageReq {
+func (r *repl) edit(climb key) editAction {
 	e := &editor{r: r, start: r.last.start, count: r.last.count}
 
 	switch {
@@ -127,15 +136,28 @@ func (r *repl) edit(climb key) pageReq {
 // loop reads and handles keys until the user leaves the editor, returning what
 // run() should do next: nothing, or page in a direction (Page-Up/Down leave the
 // editor and page from the command line).
-func (e *editor) loop() pageReq {
+func (e *editor) loop() editAction {
 	for {
 		k, ok := e.r.rd.readKey()
 		if !ok {
-			return pageNone
+			return actNone
+		}
+		// A save confirmation flashed in the header is cleared on the next key,
+		// restoring the live line counts.
+		if e.flash {
+			e.paintHeader(e.r.header(e.start, e.start+e.count-1))
+			e.flash = false
 		}
 		switch k.kind {
 		case keyCtrlC, keyEsc:
-			return pageNone
+			return actNone
+		case keyCtrlX:
+			return actExit
+		case keyCtrlS:
+			if e.r.b.name == "" {
+				return actSave // no file yet — drop to the prompt to name it
+			}
+			e.save()
 		case keyLeft:
 			if k.ctrl {
 				e.wordLeft()
@@ -151,7 +173,7 @@ func (e *editor) loop() pageReq {
 			case e.cy < e.count-1:
 				e.moveTo(e.cy+1, 0) // wrap to start of next line
 			default:
-				return pageNone // right past the last character leaves, mirroring Left entering there
+				return actNone // right past the last character leaves, mirroring Left entering there
 			}
 		case keyUp:
 			if e.cy > 0 {
@@ -161,17 +183,17 @@ func (e *editor) loop() pageReq {
 			if e.cy < e.count-1 {
 				e.moveTo(e.cy+1, e.cx)
 			} else {
-				return pageNone // down past the last line leaves, mirroring Up entering there
+				return actNone // down past the last line leaves, mirroring Up entering there
 			}
 		case keyPageUp:
 			// Leave and page up, but only when there's a line above the block to
 			// reach; otherwise ignore the key and stay, like Up at the top row.
 			if e.start > 1 {
-				return pageReqUp
+				return actPageUp
 			}
 		case keyPageDown:
 			if e.start+e.count <= len(e.r.b.lines) {
-				return pageReqDown
+				return actPageDown
 			}
 		case keyHome:
 			if k.ctrl {
@@ -512,6 +534,32 @@ func (e *editor) undo() {
 	prePhysRow, _ := e.physCursor()
 	inverse(e)
 	e.repaintAll(prePhysRow)
+}
+
+// save writes the buffer to disk without leaving the editor — Ctrl+S checkpoints
+// in place — and flashes a confirmation in the header row, leaving the cursor
+// where it is. It is only reached with a named buffer; an unnamed Ctrl+S returns
+// actSave so run() can prompt for a name at the command line.
+func (e *editor) save() {
+	n, err := e.r.b.save()
+	if err != nil {
+		e.paintHeader(faint(fmt.Sprintf("nved: %v", err)))
+	} else {
+		e.paintHeader(faint(fmt.Sprintf("wrote %d lines to %s", n, e.r.b.name)))
+	}
+	e.flash = true
+}
+
+// paintHeader rewrites the faint header row above the block in place and returns
+// the cursor to where it was, so a message can replace the header without
+// repainting the block. The header sits one physical row above the block top —
+// curRow+1 rows above the cursor.
+func (e *editor) paintHeader(text string) {
+	curRow, curCol := e.physCursor()
+	out(csiHide)
+	out(cuu(curRow+1) + "\r" + csiEL + text)
+	out(cud(curRow+1) + cha(curCol))
+	out(csiShow)
 }
 
 // --- redraw ----------------------------------------------------------------

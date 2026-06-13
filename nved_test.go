@@ -475,3 +475,26 @@ func TestSaveArg(t *testing.T) {
 		}
 	}
 }
+
+func TestExitAliases(t *testing.T) {
+	// Every alias quits a clean buffer at once.
+	for _, cmd := range []string{"x", "exit", "q", "quit"} {
+		b := &buffer{lines: []string{"hi"}}
+		if !(&repl{b: b}).dispatch(cmd) {
+			t.Errorf("%q on a clean buffer should quit", cmd)
+		}
+	}
+	// Warn-twice spans the aliases: a first exit (any alias) arms, a second
+	// (any alias) discards.
+	b := &buffer{lines: []string{"hi"}, modified: true}
+	r := &repl{b: b}
+	if r.dispatch("q") {
+		t.Fatal("first exit on a dirty buffer should warn, not quit")
+	}
+	if !b.exitArmed {
+		t.Fatal("first exit should arm the warning")
+	}
+	if !r.dispatch("exit") {
+		t.Fatal("second exit on a dirty buffer should discard and quit")
+	}
+}
