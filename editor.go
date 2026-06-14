@@ -243,8 +243,8 @@ func (e *editor) loop() editAction {
 				e.cellLeft()
 			}
 		case keyRune:
-			if e.aligned && k.r == e.r.delim {
-				break // typing the delimiter would add a column — structural, raw mode only
+			if e.aligned && k.r == e.r.delim && !e.inQuotedValue() {
+				break // outside quotes the delimiter would add a column — structural, raw mode only
 			}
 			e.insert(k.r)
 		}
@@ -309,6 +309,22 @@ func (e *editor) headRows() int {
 		return 2
 	}
 	return 1
+}
+
+// inQuotedValue reports whether the cursor sits inside the quoted interior of its
+// field — past the opening quote and before the closing one. There the delimiter
+// is ordinary data (the comma in "a,b"), so typing it is a value edit, not a new
+// column. Everywhere else in aligned mode the delimiter stays suppressed: with
+// quotes off no field is ever quoted, and at a quote's own position the delimiter
+// would land outside it and split the row. To put a delimiter into an unquoted
+// cell, quote the cell first (type " at each end), then type inside.
+func (e *editor) inQuotedValue() bool {
+	if !e.r.quotes {
+		return false
+	}
+	spans := e.alignedSpans(e.curLine())
+	s := spans[fieldOf(spans, e.cx)]
+	return s.quoted && e.cx > s.rawStart && e.cx < s.rawEnd
 }
 
 // alignedSpans is the editor's parse of one line: fieldSpans, but a line that

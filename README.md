@@ -138,9 +138,12 @@ Climb into an aligned block and you edit it in place, cell by cell. `Tab` and
 re-aligns as you type — widen one cell and the columns below it shift to match.
 Editing changes the field value only: the delimiter key is swallowed, and
 `Enter`-split and row joins are suppressed, so you can't accidentally restructure
-the file from inside a cell. For structural edits — splitting a row, adding a
-column — `dsv off` back to plain text. A quoted field keeps its quotes on screen
-and on save, so you always see which cells are quoted and which aren't.
+the file from inside a cell. The one exception is a quoted cell — inside the
+quotes the delimiter is data, so typing a comma in `"a,b"` works; to put one in a
+plain cell, quote it first by typing `"` at each end. For structural edits —
+splitting a row, adding a column — `dsv off` back to plain text. A quoted field
+keeps its quotes on screen and on save, so you always see which cells are quoted
+and which aren't.
 
 ## License
 

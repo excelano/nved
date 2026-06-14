@@ -833,6 +833,36 @@ func TestAlignedInsert(t *testing.T) {
 	}
 }
 
+func TestInQuotedValue(t *testing.T) {
+	// `x,"a,b",c`: field 1 is the quoted "a,b" — opening quote at rune 2, closing at
+	// rune 6, so its raw span is 2..7. A delimiter is data only at a cursor strictly
+	// between the quotes: position 3 sits just inside the opening quote, position 7
+	// just past the closing one.
+	e := newAlignedEditor(t, []string{`x,"a,b",c`}, ',', true, false, 0, 0)
+	for _, c := range []struct {
+		cx   int
+		want bool
+	}{
+		{0, false}, // unquoted field 0
+		{2, false}, // before the opening quote — comma here splits the row
+		{3, true},  // just inside the opening quote
+		{6, true},  // just before the closing quote — still inside
+		{7, false}, // just past the closing quote — comma here splits the row
+		{8, false}, // unquoted final field
+	} {
+		e.cx = c.cx
+		if got := e.inQuotedValue(); got != c.want {
+			t.Errorf("inQuotedValue cx=%d = %v, want %v", c.cx, got, c.want)
+		}
+	}
+	// With quotes off, a quoted-looking field is just text — never a value home for
+	// the delimiter.
+	e2 := newAlignedEditor(t, []string{`"a,b"`}, ',', false, false, 0, 2)
+	if e2.inQuotedValue() {
+		t.Error("quotes off: inQuotedValue should be false")
+	}
+}
+
 func TestAlignedReflowWidens(t *testing.T) {
 	// col0 spans "a" and "bb" -> width 2. Growing line 1's first cell past that must
 	// widen the column (the reflow trigger that picks a full repaint over a redraw).

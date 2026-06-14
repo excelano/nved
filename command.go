@@ -249,8 +249,8 @@ DSV view (opt-in; a file opens as plain text):
   csv tsv asv      presets; asv = unit fields + record rows (csv off etc. to undo)
 a bare dsv / quotes / headers / rows reports its current state.
 climb into an aligned block to edit cells in place: edits change the field
-value only — the delimiter key, Enter-split and row joins are suppressed
-(dsv off for structural edits).
+value only — the delimiter key (allowed inside a "quoted" cell, where it is
+data), Enter-split and row joins are suppressed (dsv off for structural edits).
 out-of-range numbers clamp to the nearest valid line.
 a , can be used in place of . in any range.
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
