@@ -58,6 +58,7 @@ At the `>` prompt you address lines by number:
 | `s [name]` | save; a name is required when unnamed (also `Ctrl+S`) |
 | `x`        | exit; warns once when dirty (also `Ctrl+X`, `q`, `quit`) |
 | `h`        | show the command and key reference (also `H`, `?`) |
+| `wrap on\|off` | word-wrap long lines, or show one per row and pan sideways |
 
 The `.` separator sits under the right hand on the numeric keypad, where there is
 no comma; a `,` works in its place anywhere — the two are interchangeable.
@@ -92,7 +93,12 @@ The printed block sits just above the prompt. Climb into it to edit:
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 
 Long lines are word-wrapped by nved itself, with a continuation indent that lines
-the wrapped text up under the gutter. Edits stay inside the printed block; to edit
+the wrapped text up under the gutter. `wrap off` turns that off: each line then
+takes a single row, and a line wider than the terminal shows a faint `‹` or `›`
+where it runs off the side — climb in and the row pans sideways to follow the
+cursor, the gutter held fixed at the left. It is the plain-text counterpart of the
+aligned column view's horizontal pan. `wrap on` restores wrapping, and a bare
+`wrap` reports the current setting. Edits stay inside the printed block; to edit
 elsewhere, print that range and climb into it.
 
 ## Viewing delimited files (CSV, TSV, DSV)

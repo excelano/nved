@@ -478,7 +478,7 @@ func (r *repl) printBlockAligned(start, end int) bool {
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	if showSticky {
 		text, sep := alignRow(headerFields, colW, r.delim)
-		emitAlignedRow(w, 1, 0, avail, text, sep, true)
+		emitWindowedRow(w, 1, 0, avail, text, sep, true)
 	}
 	for k, fields := range rows {
 		num := start + k
@@ -486,24 +486,28 @@ func (r *repl) printBlockAligned(start, end int) bool {
 		// top of the block (start == 1) or pinned above it, so it reads the same way.
 		dim := r.headers && num == 1
 		text, sep := alignRow(fields, colW, r.delim)
-		emitAlignedRow(w, num, 0, avail, text, sep, dim)
+		emitWindowedRow(w, num, 0, avail, text, sep, dim)
 	}
 	return true
 }
 
-// emitAlignedRow prints one gutter-prefixed aligned row, windowed to the visible
-// columns at the given horizontal pan, with a ‹ / › marker on whichever side hides
-// content. A dim row (the column header) is drawn entirely faint — number, text,
-// and markers; an ordinary row is faint only in its gutter and markers, like every
-// other printed line.
-func emitAlignedRow(w, num, hscroll, avail int, aligned string, sep []bool, dim bool) {
-	rs := []rune(aligned)
+// emitWindowedRow prints one gutter-prefixed row windowed to the visible columns
+// at the given horizontal pan, with a ‹ / › marker on whichever side hides content.
+// It is the shared single-row renderer for both views that pan instead of wrap: the
+// aligned DSV grid (which passes a sep mask marking the faint separator delimiters)
+// and plain text with wrap off (which passes the tab-expanded line and a nil mask).
+// A dim row (the column header) is drawn entirely faint — number, text, and markers;
+// an ordinary row is faint only in its gutter, separator delimiters, and markers,
+// like every other printed line.
+func emitWindowedRow(w, num, hscroll, avail int, display string, sep []bool, dim bool) {
+	rs := []rune(display)
 	left, lo, hi, right := window(len(rs), hscroll, avail)
 	// A dim row is faint as a whole, so its separators need no per-rune faint; an
 	// ordinary row faints only its separator delimiters (and gutter and markers).
+	// sep is nil for the raw wrap-off view, where no rune is a separator.
 	var body strings.Builder
 	for i := lo; i < hi; i++ {
-		if sep[i] && !dim {
+		if i < len(sep) && sep[i] && !dim {
 			body.WriteString(faint(string(rs[i])))
 		} else {
 			body.WriteRune(rs[i])

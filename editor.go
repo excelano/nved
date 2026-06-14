@@ -135,6 +135,9 @@ func (r *repl) edit(climb key) editAction {
 	// lands the cursor at its target.
 	out("\r" + csiEL)
 	out(csiWrapOff)
+	if e.windowed() {
+		e.panToCursor() // a wide last line climbed into at its end starts panned into view
+	}
 	e.repaintAll(e.blockHeight())
 
 	action := e.loop()
@@ -293,12 +296,18 @@ func (e *editor) availWidth() int {
 // disp is the tab-expanded display runes of line cy — the units that wrap.
 func (e *editor) disp(cy int) []rune { return []rune(expandTabs(e.lineText(cy))) }
 
+// windowed reports whether the block renders one screen row per line, panning a
+// too-wide row sideways under the cursor rather than wrapping it: the aligned DSV
+// view, and plain text with wrap off. It is the editor's read of the repl's
+// oneRowPerLine, the predicate that gates every hscroll path below.
+func (e *editor) windowed() bool { return e.aligned || !e.r.wrap }
+
 // physHeightOf is how many physical rows line cy occupies once word-wrapped — or
-// exactly one in aligned mode, where rows never wrap, which is what collapses the
-// whole vertical half of the cursor math (lineTopRow becomes cy, blockHeight the
-// line count).
+// exactly one when the view is windowed (aligned, or wrap off), where rows never
+// wrap, which is what collapses the whole vertical half of the cursor math
+// (lineTopRow becomes cy, blockHeight the line count).
 func (e *editor) physHeightOf(cy int) int {
-	if e.aligned {
+	if e.windowed() {
 		return 1
 	}
 	return len(wrapRows(e.disp(cy), e.availWidth()))
@@ -393,13 +402,11 @@ func (e *editor) blockHeight() int { return e.lineTopRow(e.count) }
 // (past the wrap width, e.g. on a hanging break space) is clamped to the last
 // terminal column.
 func (e *editor) physCursor() (rowOff, chaCol int) {
-	if e.aligned {
-		// One row per line, so the row offset is just cy; the column comes from the
-		// aligned visualCol analog, which maps the raw cursor index across padded
-		// columns, less the horizontal pan. An unparseable line can't happen here —
-		// the block is alignable.
-		spans := e.alignedSpans(e.curLine())
-		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, gapWidth(e.r.delim), e.cx) - e.hscroll + 1
+	if e.windowed() {
+		// One row per line, so the row offset is just cy; the column is the cursor's
+		// visual column (aligned-grid or tab-expanded, per the view) less the
+		// horizontal pan, past the gutter.
+		chaCol = e.width() + 2 + e.curVisualCol() - e.hscroll + 1
 		if chaCol > e.tw() {
 			chaCol = e.tw()
 		}
@@ -420,7 +427,7 @@ func (e *editor) physCursor() (rowOff, chaCol int) {
 // moveTo repositions the cursor to (cy, cx), clamping into range. No text
 // changes, so physCursor computed before and after the change agree on the
 // physical layout; the difference gives the relative row move, then an absolute
-// column set. In aligned mode a move that carries the cursor outside the visible
+// column set. In a windowed view a move that carries the cursor outside the visible
 // window pans the block horizontally instead, which re-windows every row, so it
 // repaints in full rather than emitting a relative cursor hop.
 func (e *editor) moveTo(cy, cx int) {
@@ -428,7 +435,7 @@ func (e *editor) moveTo(cy, cx int) {
 	cx = clamp(cx, 0, e.lineLen(cy))
 	oldRow, _ := e.physCursor()
 	e.cy, e.cx = cy, cx
-	if e.aligned && e.panToCursor() {
+	if e.windowed() && e.panToCursor() {
 		e.repaintAll(oldRow)
 		return
 	}
@@ -438,14 +445,27 @@ func (e *editor) moveTo(cy, cx int) {
 	out(cha(newCol))
 }
 
+// curVisualCol is the cursor's on-screen column (0-based, past the gutter, before
+// the horizontal pan is subtracted), read the way the current view lays text out:
+// across the padded aligned grid in DSV mode, or the tab-expanded text in plain
+// mode. It is the single coordinate both physCursor and panToCursor window by, so
+// the two always agree on where the cursor sits.
+func (e *editor) curVisualCol() int {
+	if e.aligned {
+		spans := e.alignedSpans(e.curLine())
+		return alignedVisualCol(spans, e.colW, gapWidth(e.r.delim), e.cx)
+	}
+	return visualCol(e.curLine(), e.cx)
+}
+
 // panToCursor adjusts hscroll so the cursor stays in the visible window, keeping a
 // one-column margin at each edge for the ‹ / › markers (so the cursor never lands
 // under one). It reports whether hscroll changed — the signal to re-window the
-// whole block. Aligned mode only; the raw editor wraps instead of panning.
+// whole block. Windowed views only (aligned, or wrap off); the word-wrapping editor
+// wraps instead of panning.
 func (e *editor) panToCursor() bool {
 	avail := e.availWidth()
-	spans := e.alignedSpans(e.curLine())
-	v := alignedVisualCol(spans, e.colW, gapWidth(e.r.delim), e.cx)
+	v := e.curVisualCol()
 	old := e.hscroll
 	if v < e.hscroll+1 {
 		e.hscroll = v - 1
@@ -580,6 +600,17 @@ func (e *editor) finishCharEdit(prePhysRow, preH int) {
 			e.redrawLine(prePhysRow)
 		} else {
 			e.repaintAll(prePhysRow)
+		}
+		return
+	}
+	if !e.r.wrap {
+		// wrap off: one row per line with no columns to reflow, so the edit touches
+		// only this row's text. A pan re-windows every row (repaint in full);
+		// otherwise the fast single-line redraw holds.
+		if e.panToCursor() {
+			e.repaintAll(prePhysRow)
+		} else {
+			e.redrawLine(prePhysRow)
 		}
 		return
 	}
@@ -841,7 +872,7 @@ func (e *editor) redrawLine(prePhysRow int) {
 	if e.aligned {
 		e.emitAligned(e.start+e.cy, e.curLine())
 	} else {
-		emitLine(e.width(), e.start+e.cy, e.curLine(), e.availWidth())
+		e.emitRaw(e.start+e.cy, e.curLine())
 	}
 	afterRow := lineTop + e.physHeightOf(e.cy)
 	targetRow, targetCol := e.physCursor()
@@ -867,7 +898,7 @@ func (e *editor) repaintAll(prePhysRow int) {
 		if e.aligned {
 			e.emitAligned(e.start+j, e.lineText(j))
 		} else {
-			emitLine(e.width(), e.start+j, e.lineText(j), e.availWidth())
+			e.emitRaw(e.start+j, e.lineText(j))
 		}
 	}
 	out(csiED) // erase the rows a shrink would otherwise strand
@@ -878,11 +909,24 @@ func (e *editor) repaintAll(prePhysRow int) {
 
 // emitAligned prints one aligned row — buffer line num, rendered as its raw cells
 // padded to the block grid — for the climbed-in DSV view. Line 1 is drawn faint
-// as the column header, matching the command-line print path's emitAlignedRow.
+// as the column header, matching the command-line print path's emitWindowedRow.
 func (e *editor) emitAligned(num int, text string) {
 	dim := e.r.headers && num == 1
 	aligned, sep := alignRow(e.alignedCells(text), e.colW, e.r.delim)
-	emitAlignedRow(e.width(), num, e.hscroll, e.availWidth(), aligned, sep, dim)
+	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), aligned, sep, dim)
+}
+
+// emitRaw prints one raw (non-DSV) buffer line for the editor: word-wrapped onto
+// continuation rows when wrap is on, or as a single hscroll-windowed row with ‹ / ›
+// markers when wrap is off — the plain-text mirror of emitAligned. The tab-expanded
+// text is windowed with a nil separator mask, since plain text has no delimiters to
+// draw faint.
+func (e *editor) emitRaw(num int, text string) {
+	if e.r.wrap {
+		emitLine(e.width(), num, text, e.availWidth())
+		return
+	}
+	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), expandTabs(text), nil, false)
 }
 
 // --- rune-slice surgery ----------------------------------------------------

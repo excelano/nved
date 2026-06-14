@@ -41,6 +41,13 @@ type repl struct {
 	quotes  bool
 	headers bool
 
+	// wrap controls how a too-wide plain-text line is shown: on (the default) word-
+	// wraps it onto continuation rows; off renders one row per line and pans it
+	// sideways under the cursor, the same windowing the aligned DSV view uses. It is
+	// the text-mode counterpart of the aligned view's always-on horizontal pan, and
+	// is independent of the DSV layer — orthogonal to delim/quotes/headers.
+	wrap bool
+
 	// lastAligned records whether the last printed block rendered as aligned
 	// columns (delimiter set and every line parsed) rather than raw text. The
 	// editor reads it to choose aligned vs. raw geometry on a climb, and the climb
@@ -130,7 +137,7 @@ func main() {
 	}
 
 	w, h := termSize(fd)
-	r := &repl{b: b, rd: newReader(), termW: w, termH: h}
+	r := &repl{b: b, rd: newReader(), termW: w, termH: h, wrap: true}
 	if startSpec != "" {
 		if r.dispatch(startSpec) {
 			return

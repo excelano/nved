@@ -57,12 +57,19 @@ func (r *repl) header(start, end int) string {
 	return faint(s)
 }
 
+// oneRowPerLine reports whether the current view renders each buffer line as
+// exactly one screen row, panning a too-wide row sideways rather than wrapping it:
+// the aligned DSV view (delimiter set) and plain text with wrap off. It collapses
+// the whole vertical paging math to a simple line count and tells the print and
+// editor paths to window rows horizontally instead of wrapping them.
+func (r *repl) oneRowPerLine() bool { return r.delim != 0 || !r.wrap }
+
 // physHeight is how many physical rows buffer line i (1-based) occupies once
-// word-wrapped at the current width. In aligned DSV mode rows never wrap — one
-// buffer line is exactly one screen row — so the whole vertical paging math
-// (visibleTail, fillDown, the page windows) collapses to a simple line count.
+// word-wrapped at the current width — or exactly one when the view is
+// one-row-per-line (aligned DSV, or wrap off), which collapses the vertical paging
+// math (visibleTail, fillDown, the page windows) to a simple line count.
 func (r *repl) physHeight(i int) int {
-	if r.delim != 0 {
+	if r.oneRowPerLine() {
 		return 1
 	}
 	return len(wrapRows([]rune(expandTabs(r.b.lines[i-1])), r.textWidth()))

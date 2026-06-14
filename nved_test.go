@@ -18,7 +18,7 @@ func newEditor(t *testing.T, lines []string, cy, cx int) *editor {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	b := &buffer{lines: append([]string(nil), lines...)}
-	return &editor{r: &repl{b: b, termW: 80}, start: 1, count: len(lines), cy: cy, cx: cx}
+	return &editor{r: &repl{b: b, termW: 80, wrap: true}, start: 1, count: len(lines), cy: cy, cx: cx}
 }
 
 func TestSplitLines(t *testing.T) {
@@ -282,7 +282,7 @@ func TestBlockGeometry(t *testing.T) {
 }
 
 func newRepl(lines []string, termW, termH int) *repl {
-	return &repl{b: &buffer{lines: append([]string(nil), lines...)}, termW: termW, termH: termH}
+	return &repl{b: &buffer{lines: append([]string(nil), lines...)}, termW: termW, termH: termH, wrap: true}
 }
 
 func TestVisibleTailAndFillDown(t *testing.T) {
@@ -768,7 +768,7 @@ func newAlignedEditor(t *testing.T, lines []string, delim rune, quotes, headers 
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	b := &buffer{lines: append([]string(nil), lines...)}
-	r := &repl{b: b, termW: 80, delim: delim, quotes: quotes, headers: headers, lastAligned: true}
+	r := &repl{b: b, termW: 80, delim: delim, quotes: quotes, headers: headers, lastAligned: true, wrap: true}
 	e := &editor{r: r, start: 1, count: len(lines), cy: cy, cx: cx, aligned: true}
 	e.recomputeColW()
 	return e
@@ -824,6 +824,64 @@ func TestAlignedHorizontalPan(t *testing.T) {
 	e.cx = e.lineLen(0)
 	if !e.panToCursor() {
 		t.Fatal("cursor at the end of a wide row should pan")
+	}
+	if e.hscroll == 0 {
+		t.Fatal("hscroll should advance past 0")
+	}
+	if _, col := e.physCursor(); col < 4 || col > e.r.termW {
+		t.Errorf("panned cursor col=%d, want within (gutter, %d]", col, e.r.termW)
+	}
+	// Back to the start pans home again.
+	e.cx = 0
+	if !e.panToCursor() || e.hscroll != 0 {
+		t.Errorf("return to start: hscroll=%d, want 0", e.hscroll)
+	}
+}
+
+// newWrapOffEditor builds a plain-text editor with wrap off — the windowing,
+// hscroll-panning text view that shares its machinery with the aligned view.
+func newWrapOffEditor(t *testing.T, lines []string, cy, cx int) *editor {
+	t.Helper()
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	b := &buffer{lines: append([]string(nil), lines...)}
+	r := &repl{b: b, termW: 80, wrap: false}
+	return &editor{r: r, start: 1, count: len(lines), cy: cy, cx: cx}
+}
+
+func TestWrapOffPhysCursor(t *testing.T) {
+	e := newWrapOffEditor(t, []string{"hello world foo"}, 0, 0)
+	e.r.termW = 13 // gutter 1 + 2 -> A = 10, but wrap off never wraps
+	// One screen row per line: the row offset is always 0, never a wrapped row.
+	for _, cx := range []int{0, 6, 10} {
+		e.cx = cx
+		if row, _ := e.physCursor(); row != 0 {
+			t.Errorf("cx=%d row=%d, want 0 (wrap off is one row per line)", cx, row)
+		}
+	}
+	// The column is visualCol past the gutter (width 1 + 2), plus 1, less the pan.
+	e.cx, e.hscroll = 2, 0
+	if _, col := e.physCursor(); col != 6 { // 3 + 2 - 0 + 1
+		t.Errorf("unpanned cx=2 col=%d, want 6", col)
+	}
+	e.cx, e.hscroll = 8, 5
+	if _, col := e.physCursor(); col != 7 { // 3 + 8 - 5 + 1
+		t.Errorf("panned cx=8 hscroll=5 col=%d, want 7", col)
+	}
+}
+
+func TestWrapOffPan(t *testing.T) {
+	e := newWrapOffEditor(t, []string{"a very wide plain text line that exceeds the window"}, 0, 0)
+	e.r.termW = 16 // gutter 1 + 2 -> 13 columns of text
+	// At the left edge nothing is hidden, so there is no pan.
+	if e.panToCursor() || e.hscroll != 0 {
+		t.Fatalf("start: pan or hscroll=%d, want no pan / 0", e.hscroll)
+	}
+	// Jump to the end of the wide line: it must pan, and the cursor must land back
+	// on screen (past the gutter, within the terminal width).
+	e.cx = e.lineLen(0)
+	if !e.panToCursor() {
+		t.Fatal("cursor at the end of a wide line should pan")
 	}
 	if e.hscroll == 0 {
 		t.Fatal("hscroll should advance past 0")
@@ -1037,15 +1095,28 @@ func TestAlignRow(t *testing.T) {
 	}
 }
 
-func TestEmitAlignedRowShowsFaintDelim(t *testing.T) {
+func TestEmitWindowedRowShowsFaintDelim(t *testing.T) {
 	var buf strings.Builder
 	old := screen
 	screen = &buf
 	t.Cleanup(func() { screen = old })
 	text, sep := alignRow([]string{"a", "b"}, []int{1, 1}, ',')
-	emitAlignedRow(1, 1, 0, 40, text, sep, false)
+	emitWindowedRow(1, 1, 0, 40, text, sep, false)
 	if got := buf.String(); !strings.Contains(got, faint(",")) {
 		t.Errorf("rendered row should contain a faint comma, got %q", got)
+	}
+}
+
+// A raw wrap-off row passes a nil separator mask; emitWindowedRow must render it
+// without panicking and without inventing any faint runes.
+func TestEmitWindowedRowRawNilMask(t *testing.T) {
+	var buf strings.Builder
+	old := screen
+	screen = &buf
+	t.Cleanup(func() { screen = old })
+	emitWindowedRow(1, 1, 0, 40, "hello world", nil, false)
+	if got := buf.String(); !strings.Contains(got, "hello world") {
+		t.Errorf("rendered row should contain the plain text, got %q", got)
 	}
 }
 
@@ -1076,6 +1147,61 @@ func TestAlignedPhysHeightIsOne(t *testing.T) {
 	r.delim = ','
 	if got := r.physHeight(2); got != 1 {
 		t.Errorf("aligned physHeight(2) = %d, want 1", got)
+	}
+}
+
+func TestWrapDispatch(t *testing.T) {
+	r := newRepl([]string{"hello"}, 80, 24) // wrap defaults on
+	// on / off set the flag, and each is a matched command.
+	if !r.wrapDispatch("wrap off") || r.wrap {
+		t.Fatalf("wrap off -> wrap=%v, want false", r.wrap)
+	}
+	if !r.wrapDispatch("wrap on") || !r.wrap {
+		t.Fatalf("wrap on -> wrap=%v, want true", r.wrap)
+	}
+	// A bare verb reports state and still matches.
+	if !r.wrapDispatch("wrap") {
+		t.Error("bare wrap should match")
+	}
+	// A bad argument is matched but leaves the flag alone.
+	r.wrap = true
+	if !r.wrapDispatch("wrap sideways") || !r.wrap {
+		t.Errorf("a bad wrap arg should match without changing the flag, got %v", r.wrap)
+	}
+	// A non-wrap command falls through so address parsing can handle it.
+	if r.wrapDispatch("5.10") {
+		t.Error("5.10 should not match wrapDispatch")
+	}
+	// A matched command clears r.last — its report sits between block and prompt.
+	r.last = &block{start: 1, count: 1}
+	r.wrapDispatch("wrap off")
+	if r.last != nil {
+		t.Error("a matched wrap command should clear r.last")
+	}
+}
+
+func TestWrapOffPhysHeightIsOne(t *testing.T) {
+	r := newRepl([]string{"a", "this is a very long line that would wrap when wrap is on"}, 20, 24)
+	if got := r.physHeight(2); got <= 1 {
+		t.Fatalf("wrap on physHeight(2) = %d, want > 1 (the long line wraps)", got)
+	}
+	r.wrap = false
+	if got := r.physHeight(2); got != 1 {
+		t.Errorf("wrap off physHeight(2) = %d, want 1", got)
+	}
+}
+
+func TestPrintLinesWrapOffSmoke(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"short", "a line wide enough to be windowed off the right edge of a narrow view"}, 30, 24)
+	r.wrap = false
+	r.printLines(1, 2) // exercises the nil-mask windowed raw print path
+	if r.last == nil {
+		t.Fatal("wrap-off print should record a climbable block")
+	}
+	if r.lastAligned {
+		t.Error("a plain-text wrap-off block is not aligned")
 	}
 }
 

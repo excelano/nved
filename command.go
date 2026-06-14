@@ -57,6 +57,9 @@ func (r *repl) dispatch(line string) bool {
 		}
 		return false
 	}
+	if r.wrapDispatch(s) {
+		return false
+	}
 	if r.dsvDispatch(s) {
 		return false
 	}
@@ -112,6 +115,25 @@ func (r *repl) headTail(s string) (start, end int, ok, matched bool) {
 		return start, end, true, true
 	}
 	return 0, 0, false, false
+}
+
+// wrapDispatch handles the wrap command — bare reports state, on/off sets it —
+// and reports whether s was a wrap command so the main dispatch falls through to
+// address parsing when it isn't. Like the DSV commands it clears r.last: the
+// state report sits between the block and the prompt, so a climb key would no
+// longer land on the right rows. wrap is orthogonal to the DSV layer, so it lives
+// outside dsvDispatch.
+func (r *repl) wrapDispatch(s string) bool {
+	switch {
+	case s == "wrap":
+		emitf("wrap: %s\n", onOff(r.wrap))
+	case strings.HasPrefix(s, "wrap "):
+		onOffArg("wrap", strings.TrimPrefix(s, "wrap "), &r.wrap)
+	default:
+		return false
+	}
+	r.last = nil
+	return true
 }
 
 // saveArg reports whether s is a save command — "s" or "save", optionally
@@ -207,7 +229,14 @@ func (r *repl) printBlockRaw(start, end int) {
 	a := r.textWidth()
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	for i := start; i <= end; i++ {
-		emitLine(w, i, r.b.lines[i-1], a)
+		if r.wrap {
+			emitLine(w, i, r.b.lines[i-1], a)
+		} else {
+			// wrap off: one row per line, windowed at the left edge (the command-line
+			// print never pans — only a climbed-in cursor does), with a faint › where
+			// the line runs past the right edge.
+			emitWindowedRow(w, i, 0, a, expandTabs(r.b.lines[i-1]), nil, false)
+		}
 	}
 }
 
@@ -240,6 +269,7 @@ func printHelp() {
   s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
   x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)
+  wrap on|off wrap long lines, or show one per row and pan sideways
 DSV view (opt-in; a file opens as plain text):
   dsv C       show lines as columns split on C — a character, or tab / unit
   dsv off     back to plain text
@@ -247,7 +277,7 @@ DSV view (opt-in; a file opens as plain text):
   headers on|off   pin line 1 as a faint column header
   rows newline|record   record separator (record = ASCII 0x1E)
   csv tsv asv      presets; asv = unit fields + record rows (csv off etc. to undo)
-a bare dsv / quotes / headers / rows reports its current state.
+a bare dsv / quotes / headers / rows / wrap reports its current state.
 climb into an aligned block to edit cells in place: edits change the field
 value only — the delimiter key (allowed inside a "quoted" cell, where it is
 data), Enter-split and row joins are suppressed (dsv off for structural edits).
