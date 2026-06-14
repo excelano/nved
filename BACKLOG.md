@@ -9,8 +9,9 @@ the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
 ## Next
 
-The next feature is **native CSV / TSV / DSV handling** (below), but it needs a
-design spec before any code — see that section. Nothing else is committed-next.
+The next feature is **native CSV / TSV / DSV handling** (below). The design spec
+is written — `~/Downloads/nved-csv-design-spec.md` — so Phase 1 (CSV-aware
+display) is ready to plan and build. Nothing else is committed-next.
 
 (Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo. The undo stack now
 lives on the buffer instead of the editing session, so Ctrl+U works at the `>`
@@ -74,7 +75,58 @@ line, flag that quoted-newline CSVs aren't aligned).
    reflow mutations are undoable through the existing mechanism.
 
 Sequenced AFTER Ctrl+U undo, both because phase 2 depends on it and because CSV
-warrants its own design spec before any code.
+warranted its own design spec before any code. **Design spec now written:**
+`~/Downloads/nved-csv-design-spec.md`. Key resolution from the spec — aligning
+turns vertical wrap OFF (1 buffer line = 1 screen row), which collapses the
+vertical cursor math and leaves only a horizontal `visualCol` analog (parameterized
+by the block's column-width vector). Undo composes for free: widths are derived
+from text, so v0.5.0's text undo restores them.
+
+Command surface (locked in discussion): **opt-in by command, no autodetect** — a
+CSV opens as plain text until you ask. **Two layers:** record layer (`rows`,
+buffer-level — how bytes become lines) vs. field layer (`dsv`/`quotes`/`headers`,
+view-level, never mutates the buffer — how a line becomes columns). The split is
+load-bearing: `dsv` is a pure view, `rows` is a buffer reload, so order between
+them barely matters and a wrong setting is obvious + one command to fix.
+Commands: `dsv <delim>` (grammar = one literal char, or a name `tab`/`unit`; no
+escapes, no `\xNN`, no `gs`/`fs`), `quotes on|off`, `headers on|off`, `rows
+newline|record`. Presets: `csv` (= `dsv ,` + quotes on + headers on), `tsv` (=
+`dsv tab` + ...), and **`asv`** (the cross-layer ASCII-separated-values preset:
+`dsv unit` + `rows record` + quotes off + headers on). ASCII separators named for
+what they are — `unit` (US 0x1F, field), `record` (RS 0x1E, row), not `us`/`rs`;
+`dsv unit` + `rows record` literally spells `asv`. Bare `dsv`/`quotes`/`headers`/
+`rows` REPORT state (standing convention — see [[feedback_bare_command_reports_state]]).
+`rows` reload is lossless/reversible (re-derive bytes under new separator; resets
+block + clears undo, like reopening). Startup via existing `+spec` (`nved +csv f`,
+`nved +asv f`, `nved '+dsv unit' f`); no `-d` flag.
+
+Cell nav (Phase 2): **delimiter behaves like a line ending** — arrows step *over*
+it (never rest on it), so cells are mini-lines and arrows "just work." Ctrl+arrow
+AND Tab/Shift-Tab both jump by cell (same "jump by meaningful unit" reflex as
+word-skip; Tab also HAD to move off literal-insert — in a TSV, tab is the
+delimiter, so insert-on-Tab was a footgun). Up/Down + Home/End unchanged.
+
+Wide tables: Phase 1 truncates with `›`; **horizontal pan is a planned follow-on
+slice** (sideways twin of vertical Page-Up/Down — same block-reprint + one
+`hscroll` column offset in the cursor math; line-number gutter stays FROZEN;
+cursor pans automatically past the edge). No free terminal h-scrollbar (normal
+screen has none; only alternate-screen apps, which nved refuses). `wrap on|off`
+(default on, bare reports) is really a TEXT-mode setting that rides the SAME
+hscroll machinery — build pan once, get both DSV wide-tables and text `wrap off`.
+Aligned rows never wrap (row-wrap is incoherent; would break the 1-row invariant).
+
+Structural editing (add/remove COLUMN) = PARKED, out of v1. Do it in raw mode for
+now (`dsv off`, edit delimiters as text, re-set). If a real need appears: gated
+`col add`/`col del` commands and/or **Ctrl+Insert/Ctrl+Delete** (symmetrical,
+deliberate; preferred over Shift+Insert/Delete which = terminal paste/cut, and
+over plain Insert/Delete since Delete = delete-char). Column delete is cross-row
+data loss → always confirm ([[feedback_confirm_consequential_actions]]). REJECTED
+Tab/Shift-Tab for add/del: destroys the nav reflex + Shift-Tab silently nuking a
+column on a back-nav keystroke is a worse footgun than the one being fixed.
+
+Other recs: two-space separator, save-time re-serialization via `encoding/csv`,
+widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
+(3 and 4 independent follow-ons, order by what dogfooding makes loud).
 
 ---
 
