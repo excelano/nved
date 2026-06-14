@@ -246,7 +246,7 @@ DSV view (opt-in; a file opens as plain text):
   quotes on|off    respect "quoted,fields" when splitting
   headers on|off   pin line 1 as a faint column header
   rows newline|record   record separator (record = ASCII 0x1E)
-  csv tsv asv      presets; asv = unit fields + record rows
+  csv tsv asv      presets; asv = unit fields + record rows (csv off etc. to undo)
 a bare dsv / quotes / headers / rows reports its current state.
 climb into an aligned block to edit cells in place: edits change the field
 value only — the delimiter key, Enter-split and row joins are suppressed

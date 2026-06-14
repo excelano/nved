@@ -50,6 +50,12 @@ func (r *repl) dsvDispatch(s string) bool {
 		// the field layer paints unit-delimited columns on top.
 		r.setRows('\x1e')
 		r.preset('\x1f', false, true)
+	case s == "csv off", s == "tsv off", s == "asv off":
+		// Symmetry with the bare presets: if "csv" turns the view on, "csv off"
+		// turns it off, the same as "dsv off". This is the field-layer switch
+		// only — "asv off" leaves the record separator alone (rows newline reverts
+		// that), so off never triggers a surprise buffer reload.
+		r.setDelim("off")
 	default:
 		return false
 	}

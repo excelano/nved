@@ -114,7 +114,7 @@ their own:
 | `quotes on\|off`       | respect `"quoted,fields"` when splitting              |
 | `headers on\|off`      | draw line 1 as a faint column header, pinned when it scrolls off |
 | `rows newline\|record` | the record separator (`record` is the ASCII record separator, 0x1E) |
-| `csv` `tsv` `asv`      | presets — `csv` is `dsv ,` with quotes and headers on, `tsv` the same with tabs, `asv` the ASCII-separated set (`unit` fields, `record` rows) |
+| `csv` `tsv` `asv`      | presets — `csv` is `dsv ,` with quotes and headers on, `tsv` the same with tabs, `asv` the ASCII-separated set (`unit` fields, `record` rows); `csv off` (or `tsv`/`asv off`) is `dsv off` |
 
 Each switch invoked bare — `dsv`, `quotes`, `headers`, `rows` — reports its
 current state instead of changing it. Columns are sized to the widest cell on
