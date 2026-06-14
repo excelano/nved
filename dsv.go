@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/csv"
 	"fmt"
 	"strings"
 	"unicode"
@@ -184,47 +183,26 @@ func onOff(b bool) string {
 // printed view aligned-and-read-only (climb in via dsv off). Phase 2 brings the
 // cursor math that lets the editor render aligned too.
 
-// splitFields parses one buffer line into its fields. With quotes off it is a
-// plain split on the delimiter. With quotes on it goes through encoding/csv so
-// "a,b" reads as one field; a line that won't parse — an unbalanced quote, i.e.
-// a field whose value continues onto the next buffer line — returns ok=false,
-// the signal to fall back to a raw view rather than render a misleading grid.
-func splitFields(line string, delim rune, quotes bool) (fields []string, ok bool) {
-	if !quotes {
-		return strings.Split(line, string(delim)), true
-	}
-	if line == "" {
-		return []string{""}, true // csv reads a blank line as EOF; treat as one empty field
-	}
-	rd := csv.NewReader(strings.NewReader(line))
-	rd.Comma = delim
-	rd.FieldsPerRecord = -1 // ragged rows are allowed
-	rec, err := rd.Read()
-	if err != nil {
-		return nil, false
-	}
-	return rec, true
-}
-
 // fieldSpan locates one field inside a raw buffer line: rawStart/rawEnd are rune
 // indices bounding the field's raw text — including the surrounding quotes for a
 // quoted field — and value is the decoded cell content (quotes stripped, ""
-// un-escaped). Aligned editing keeps the buffer cursor as a raw rune index; the
-// span is what constrains it to a field's interior and maps it to and from the
-// displayed value.
+// un-escaped). nved renders the raw text, never the decoded value, so that a
+// quoted field reads as quoted on screen; value is kept for round-trip-correct
+// save, which is where decoding belongs. The cursor is a raw rune index, which
+// the span constrains to a field's interior.
 type fieldSpan struct {
 	rawStart, rawEnd int
 	value            string
 	quoted           bool
 }
 
-// fieldSpans parses a raw line into its fields with their raw rune ranges — the
-// span-level companion to splitFields, which returns only the values. With quotes
-// off it is a naive split on the delimiter (every field unquoted, range = the
-// value's runes). With quotes on it scans quote-aware: a delimiter inside quotes
-// is part of the value, and a "" pair decodes to one quote. ok is false on an
-// unbalanced quote — the same multi-line-field signal splitFields gives — or on a
-// quoted field followed by stray text, so callers fall back to the raw view
+// fieldSpans parses a raw line into its fields, each with the raw rune range it
+// occupies and its decoded value. With quotes off it is a naive split on the
+// delimiter (every field unquoted, range = the value's runes). With quotes on it
+// scans quote-aware: a delimiter inside quotes is part of the field, and a ""
+// pair decodes to one quote in value. ok is false on an unbalanced quote — a
+// field whose value runs onto the next buffer line — or on a quoted field
+// followed by stray text, so callers fall back to the raw view
 // rather than trust a malformed parse. It targets well-formed CSV/TSV/DSV; it
 // does not chase every encoding/csv leniency on malformed input.
 func fieldSpans(line string, delim rune, quotes bool) (spans []fieldSpan, ok bool) {
@@ -353,10 +331,11 @@ func truncateDisplay(s string, max int) (string, bool) {
 }
 
 // rawCells returns each field's raw text — the substring between delimiters, with
-// any surrounding quotes kept — for the aligned editing view, which renders and
-// edits the buffer's literal bytes (the cursor is a raw rune index). It shares the
-// fieldSpans parse, so it agrees with navigation about where every field begins.
-// ok is false on an unparseable line, the same raw-fallback signal as splitFields.
+// any surrounding quotes kept — which is what nved renders in both the print and
+// the climbed-in view, so the two are identical and a quoted field reads as
+// quoted. It shares the fieldSpans parse, so display, column widths, and cursor
+// navigation all agree on where every field begins. ok is false on an unparseable
+// line (an unbalanced quote), the signal to fall back to a raw, unaligned view.
 func rawCells(line string, delim rune, quotes bool) ([]string, bool) {
 	spans, ok := fieldSpans(line, delim, quotes)
 	if !ok {
@@ -418,18 +397,18 @@ func (r *repl) printBlockAligned(start, end int) bool {
 
 	rows := make([][]string, 0, end-start+1)
 	for i := start; i <= end; i++ {
-		fields, ok := splitFields(r.b.lines[i-1], r.delim, r.quotes)
+		cells, ok := rawCells(r.b.lines[i-1], r.delim, r.quotes)
 		if !ok {
 			r.printBlockRawNotice(start, end)
 			return false
 		}
-		rows = append(rows, fields)
+		rows = append(rows, cells)
 	}
 
 	showSticky := r.headers && start > 1
 	var headerFields []string
 	if showSticky {
-		hf, ok := splitFields(r.b.lines[0], r.delim, r.quotes)
+		hf, ok := rawCells(r.b.lines[0], r.delim, r.quotes)
 		if !ok {
 			r.printBlockRawNotice(start, end)
 			return false

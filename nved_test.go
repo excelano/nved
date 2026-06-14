@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/csv"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -657,32 +659,6 @@ func TestDsvDispatch(t *testing.T) {
 	}
 }
 
-func TestSplitFields(t *testing.T) {
-	// quotes off: a plain split, quotes are ordinary characters.
-	if got, ok := splitFields(`a,b,c`, ',', false); !ok || !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
-		t.Errorf("splitFields naive = %q ok=%v", got, ok)
-	}
-	if got, ok := splitFields(`"a,b",c`, ',', false); !ok || !reflect.DeepEqual(got, []string{`"a`, `b"`, "c"}) {
-		t.Errorf("splitFields naive-quoted = %q ok=%v", got, ok)
-	}
-	// quotes on: a quoted field keeps its embedded delimiter.
-	if got, ok := splitFields(`"a,b",c`, ',', true); !ok || !reflect.DeepEqual(got, []string{"a,b", "c"}) {
-		t.Errorf("splitFields quoted = %q ok=%v", got, ok)
-	}
-	// quotes on, ragged rows allowed.
-	if got, ok := splitFields(`a,b,c,d`, ',', true); !ok || len(got) != 4 {
-		t.Errorf("splitFields ragged = %q ok=%v", got, ok)
-	}
-	// an empty line is one empty field, not an EOF error.
-	if got, ok := splitFields("", ',', true); !ok || !reflect.DeepEqual(got, []string{""}) {
-		t.Errorf("splitFields empty = %q ok=%v", got, ok)
-	}
-	// an unbalanced quote signals a multi-line field -> raw fallback.
-	if _, ok := splitFields(`"a,b`, ',', true); ok {
-		t.Error("splitFields unbalanced quote should report ok=false")
-	}
-}
-
 func TestFieldSpans(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -715,28 +691,31 @@ func TestFieldSpans(t *testing.T) {
 	}
 }
 
-// fieldSpans must agree with splitFields on the decoded values for well-formed
-// lines — they are two views of one parse, and the editor relies on that.
-func TestFieldSpansMatchSplitFields(t *testing.T) {
-	lines := []string{`a,b,c`, `a,`, ``, `"a,b",c`, `"a""b",x`, `one`}
-	for _, quotes := range []bool{false, true} {
-		for _, line := range lines {
-			spans, sok := fieldSpans(line, ',', quotes)
-			vals, vok := splitFields(line, ',', quotes)
-			if sok != vok {
-				t.Errorf("ok mismatch for %q quotes=%v: spans=%v split=%v", line, quotes, sok, vok)
-				continue
-			}
-			if !sok {
-				continue
-			}
-			got := make([]string, len(spans))
-			for i, s := range spans {
-				got[i] = s.value
-			}
-			if !reflect.DeepEqual(got, vals) {
-				t.Errorf("values for %q quotes=%v: spans=%q split=%q", line, quotes, got, vals)
-			}
+// fieldSpans' quote-aware decoding must agree with encoding/csv on well-formed
+// lines — the stdlib is the oracle for the RFC quoting rules the hand-rolled
+// scanner mirrors. (nved renders the raw text, not these values, but value still
+// feeds round-trip-correct save, so it has to be right.)
+func TestFieldSpansMatchEncodingCSV(t *testing.T) {
+	lines := []string{`a,b,c`, `a,`, `"a,b",c`, `"a""b",x`, `one`, `x,"y,z","w"`}
+	for _, line := range lines {
+		spans, ok := fieldSpans(line, ',', true)
+		if !ok {
+			t.Errorf("%q: fieldSpans reported not-ok", line)
+			continue
+		}
+		rd := csv.NewReader(strings.NewReader(line))
+		rd.FieldsPerRecord = -1
+		want, err := rd.Read()
+		if err != nil {
+			t.Errorf("%q: encoding/csv error %v", line, err)
+			continue
+		}
+		got := make([]string, len(spans))
+		for i, s := range spans {
+			got[i] = s.value
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: fieldSpans values %q, encoding/csv %q", line, got, want)
 		}
 	}
 }
