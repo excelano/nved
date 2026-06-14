@@ -741,6 +741,108 @@ func TestFieldSpansMatchSplitFields(t *testing.T) {
 	}
 }
 
+func TestFieldOf(t *testing.T) {
+	spans, _ := fieldSpans("a,b,c", ',', false) // [0,1] [2,3] [4,5]
+	cases := []struct{ cx, want int }{{0, 0}, {1, 0}, {2, 1}, {3, 1}, {4, 2}, {5, 2}}
+	for _, c := range cases {
+		if got := fieldOf(spans, c.cx); got != c.want {
+			t.Errorf("fieldOf cx=%d = %d, want %d", c.cx, got, c.want)
+		}
+	}
+}
+
+func TestAlignedVisualCol(t *testing.T) {
+	spans, _ := fieldSpans("alice,30,NYC", ',', false) // [0,5] [6,8] [9,12]
+	colW := []int{5, 3, 4}                             // widest cells: alice / age / city-ish
+	// Each column starts past the prior columns padded to colW plus a two-space gap.
+	cases := []struct {
+		cx, want int
+	}{
+		{0, 0},   // start of alice
+		{5, 5},   // end of alice
+		{6, 7},   // start of 30: colW[0]=5 + 2 gap
+		{8, 9},   // end of 30
+		{9, 12},  // start of NYC: 5+2 + colW[1]=3 + 2
+		{12, 15}, // end of NYC
+	}
+	for _, c := range cases {
+		if got := alignedVisualCol(spans, colW, c.cx); got != c.want {
+			t.Errorf("alignedVisualCol cx=%d = %d, want %d", c.cx, got, c.want)
+		}
+	}
+}
+
+func TestRawCells(t *testing.T) {
+	// raw keeps the quotes (what the aligned editor renders and edits); splitFields
+	// would strip them to the value.
+	got, ok := rawCells(`"a,b",c`, ',', true)
+	if !ok || !reflect.DeepEqual(got, []string{`"a,b"`, "c"}) {
+		t.Errorf("rawCells = %q ok=%v", got, ok)
+	}
+}
+
+// newAlignedEditor builds a climbed-in DSV editor with output discarded, so a test
+// can drive aligned navigation and geometry directly.
+func newAlignedEditor(t *testing.T, lines []string, delim rune, quotes, headers bool, cy, cx int) *editor {
+	t.Helper()
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	b := &buffer{lines: append([]string(nil), lines...)}
+	r := &repl{b: b, termW: 80, delim: delim, quotes: quotes, headers: headers, lastAligned: true}
+	e := &editor{r: r, start: 1, count: len(lines), cy: cy, cx: cx, aligned: true}
+	e.recomputeColW()
+	return e
+}
+
+func TestAlignedPhysCursor(t *testing.T) {
+	e := newAlignedEditor(t, []string{"name,age,city", "alice,30,NYC"}, ',', false, true, 1, 0)
+	// gutter width is 1 (two lines), so chaCol = 1 + 2 + visualCol + 1 = visualCol + 4.
+	for _, c := range []struct{ cx, wantCol int }{{0, 4}, {6, 11}, {9, 16}} {
+		e.cx = c.cx
+		row, col := e.physCursor()
+		if row != 1 {
+			t.Errorf("cx=%d row=%d, want 1 (one screen row per line)", c.cx, row)
+		}
+		if col != c.wantCol {
+			t.Errorf("cx=%d chaCol=%d, want %d", c.cx, col, c.wantCol)
+		}
+	}
+}
+
+func TestAlignedCellNav(t *testing.T) {
+	e := newAlignedEditor(t, []string{"alice,30,NYC"}, ',', false, false, 0, 0) // fields at 0,6,9
+	e.cellRight()
+	if e.cx != 6 {
+		t.Errorf("cellRight from 0: cx=%d, want 6", e.cx)
+	}
+	e.cellRight()
+	if e.cx != 9 {
+		t.Errorf("cellRight from 6: cx=%d, want 9", e.cx)
+	}
+	e.cellLeft() // at a cell start -> previous cell start
+	if e.cx != 6 {
+		t.Errorf("cellLeft from 9: cx=%d, want 6", e.cx)
+	}
+	e.cx = 8 // partway into the middle cell
+	e.cellLeft()
+	if e.cx != 6 {
+		t.Errorf("cellLeft from mid-cell: cx=%d, want 6", e.cx)
+	}
+}
+
+func TestAlignedHeadRows(t *testing.T) {
+	// header at the top of the block (start 1) is in-block: one head row (status).
+	e := newAlignedEditor(t, []string{"name,age", "a,1"}, ',', false, true, 0, 0)
+	if e.sticky() || e.headRows() != 1 {
+		t.Errorf("start=1: sticky=%v headRows=%d, want false/1", e.sticky(), e.headRows())
+	}
+	// scrolled past line 1 with headers on: the header pins, adding a row.
+	e.start = 5
+	if !e.sticky() || e.headRows() != 2 {
+		t.Errorf("start=5: sticky=%v headRows=%d, want true/2", e.sticky(), e.headRows())
+	}
+}
+
 func TestColWidths(t *testing.T) {
 	rows := [][]string{
 		{"name", "age"},

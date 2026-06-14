@@ -352,12 +352,64 @@ func truncateDisplay(s string, max int) (string, bool) {
 	return string([]rune(s)[:max-1]), true
 }
 
+// rawCells returns each field's raw text — the substring between delimiters, with
+// any surrounding quotes kept — for the aligned editing view, which renders and
+// edits the buffer's literal bytes (the cursor is a raw rune index). It shares the
+// fieldSpans parse, so it agrees with navigation about where every field begins.
+// ok is false on an unparseable line, the same raw-fallback signal as splitFields.
+func rawCells(line string, delim rune, quotes bool) ([]string, bool) {
+	spans, ok := fieldSpans(line, delim, quotes)
+	if !ok {
+		return nil, false
+	}
+	rs := []rune(line)
+	cells := make([]string, len(spans))
+	for i, s := range spans {
+		cells[i] = string(rs[s.rawStart:s.rawEnd])
+	}
+	return cells, true
+}
+
+// fieldOf reports which field a raw cursor index cx sits in. Field boundaries are
+// the delimiters: a position belongs to the field whose raw range it falls within,
+// and the position just past a delimiter belongs to the next field — so stepping
+// the cursor across a delimiter is an ordinary cx+1, with no position ever landing
+// "on" the delimiter character itself.
+func fieldOf(spans []fieldSpan, cx int) int {
+	for f, s := range spans {
+		if cx <= s.rawEnd {
+			return f
+		}
+	}
+	return len(spans) - 1
+}
+
+// alignedVisualCol is the visualCol analog for aligned columns: the on-screen
+// column (0-based, past the gutter) of a raw cursor index cx. It sums the padded
+// width of every column before the cursor's field — each cell padded to its block
+// column width plus the two-space gap — then adds the cursor's offset inside its
+// own field. The cell renders as its raw text, so that offset is just cx minus the
+// field's raw start; this mirrors alignRow exactly, the way visualCol mirrors
+// expandTabs, keeping the cursor on the character it sits under.
+func alignedVisualCol(spans []fieldSpan, colW []int, cx int) int {
+	f := fieldOf(spans, cx)
+	col := 0
+	for g := 0; g < f && g < len(colW); g++ {
+		col += colW[g] + 2
+	}
+	if off := cx - spans[f].rawStart; off > 0 {
+		col += off
+	}
+	return col
+}
+
 // printBlockAligned renders [start,end] as aligned columns: the faint status row,
 // an optional pinned-and-faint header (buffer line 1, when it has scrolled off),
 // then each row padded to the block's column grid and truncated at the right edge
 // with a faint ›. If any line won't parse (a multi-line quoted field), it bails to
-// a raw view with a notice — it never paints a grid it can't stand behind.
-func (r *repl) printBlockAligned(start, end int) {
+// a raw view with a notice — it never paints a grid it can't stand behind, and
+// returns false so the caller marks the block un-alignable (not climbable).
+func (r *repl) printBlockAligned(start, end int) bool {
 	w := r.gutterW()
 	avail := r.termW - (w + 2)
 	if avail < 1 {
@@ -369,7 +421,7 @@ func (r *repl) printBlockAligned(start, end int) {
 		fields, ok := splitFields(r.b.lines[i-1], r.delim, r.quotes)
 		if !ok {
 			r.printBlockRawNotice(start, end)
-			return
+			return false
 		}
 		rows = append(rows, fields)
 	}
@@ -380,7 +432,7 @@ func (r *repl) printBlockAligned(start, end int) {
 		hf, ok := splitFields(r.b.lines[0], r.delim, r.quotes)
 		if !ok {
 			r.printBlockRawNotice(start, end)
-			return
+			return false
 		}
 		headerFields = hf
 	}
@@ -404,6 +456,7 @@ func (r *repl) printBlockAligned(start, end int) {
 		dim := r.headers && num == 1
 		emitAlignedRow(w, num, alignRow(fields, colW), avail, dim)
 	}
+	return true
 }
 
 // emitAlignedRow prints one gutter-prefixed aligned row, truncated at the right

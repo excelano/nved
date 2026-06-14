@@ -40,6 +40,14 @@ type repl struct {
 	delim   rune
 	quotes  bool
 	headers bool
+
+	// lastAligned records whether the last printed block rendered as aligned
+	// columns (delimiter set and every line parsed) rather than raw text. The
+	// editor reads it to choose aligned vs. raw geometry on a climb, and the climb
+	// gate uses it so a delimiter set on an un-alignable block (a multi-line
+	// quoted field shown raw) stays read-only rather than climbing into a view
+	// whose geometry the editor can't reproduce.
+	lastAligned bool
 }
 
 // block records a printed range so a later climb knows where on screen the
@@ -251,14 +259,15 @@ func (r *repl) readCommand() cmdResult {
 			line = append(line, k.r)
 			out(string(k.r))
 		case keyUp, keyLeft:
-			// While a delimiter is set the printed block is an aligned, read-only
-			// view (Phase 1): the editor renders raw, so its geometry wouldn't match
-			// the aligned rows on screen. Climb is re-enabled by dsv off.
-			if len(line) == 0 && r.last != nil && r.delim == 0 {
+			// Climb into the block to edit it: plain text always, or an aligned DSV
+			// block (the editor reproduces the aligned geometry). A delimiter set on
+			// an un-alignable block — a multi-line quoted field shown raw — stays
+			// read-only, since the on-screen raw view isn't what the editor draws.
+			if len(line) == 0 && r.last != nil && (r.delim == 0 || r.lastAligned) {
 				return cmdResult{kind: cmdClimb, climb: k}
 			}
 		case keyHome:
-			if k.ctrl && len(line) == 0 && r.last != nil && r.delim == 0 {
+			if k.ctrl && len(line) == 0 && r.last != nil && (r.delim == 0 || r.lastAligned) {
 				return cmdResult{kind: cmdClimb, climb: k}
 			}
 		case keyPageUp:

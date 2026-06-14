@@ -68,6 +68,14 @@ type editor struct {
 	cy    int // cursor row within the block, 0-based (logical line)
 	cx    int // cursor column within the row, 0-based rune index
 
+	// aligned is set when the block renders as DSV columns rather than raw text:
+	// every line is one screen row (no wrap), cells pad to colW, and the cursor
+	// steps over delimiters. colW is the block's column-width vector, recomputed
+	// whenever the block's text changes. When aligned is false the editor is the
+	// original raw, word-wrapped editor and colW is unused.
+	aligned bool
+	colW    []int
+
 	// flash is set while a save confirmation occupies the header row; the next
 	// key restores the normal header.
 	flash bool
@@ -100,6 +108,10 @@ const (
 // reflects the block's (possibly changed) size.
 func (r *repl) edit(climb key) editAction {
 	e := &editor{r: r, start: r.last.start, count: r.last.count}
+	e.aligned = r.lastAligned
+	if e.aligned {
+		e.recomputeColW()
+	}
 
 	switch {
 	case climb.kind == keyLeft:
@@ -155,13 +167,18 @@ func (e *editor) loop() editAction {
 			}
 			e.save()
 		case keyLeft:
-			if k.ctrl {
+			switch {
+			case k.ctrl && e.aligned:
+				e.cellLeft()
+			case k.ctrl:
 				e.wordLeft()
-			} else {
+			default:
 				e.moveLeft()
 			}
 		case keyRight:
 			switch {
+			case k.ctrl && e.aligned:
+				e.cellRight()
 			case k.ctrl:
 				e.wordRight()
 			case e.cx < e.lineLen(e.cy):
@@ -204,19 +221,37 @@ func (e *editor) loop() editAction {
 				e.moveTo(e.cy, e.lineLen(e.cy))
 			}
 		case keyEnter:
-			e.splitLine()
+			if !e.aligned { // aligned editing arrives in the next slice
+				e.splitLine()
+			}
 		case keyBackspace:
-			e.backspace()
+			if !e.aligned {
+				e.backspace()
+			}
 		case keyDelete:
-			e.del()
+			if !e.aligned {
+				e.del()
+			}
 		case keyCtrlU:
-			if act := e.undo(); act != actNone {
-				return act
+			if !e.aligned {
+				if act := e.undo(); act != actNone {
+					return act
+				}
 			}
 		case keyTab:
-			e.insert('\t')
+			if e.aligned {
+				e.cellRight()
+			} else {
+				e.insert('\t')
+			}
+		case keyShiftTab:
+			if e.aligned {
+				e.cellLeft()
+			}
 		case keyRune:
-			e.insert(k.r)
+			if !e.aligned {
+				e.insert(k.r)
+			}
 		}
 	}
 }
@@ -256,8 +291,48 @@ func (e *editor) availWidth() int {
 // disp is the tab-expanded display runes of line cy — the units that wrap.
 func (e *editor) disp(cy int) []rune { return []rune(expandTabs(e.lineText(cy))) }
 
-// physHeightOf is how many physical rows line cy occupies once word-wrapped.
-func (e *editor) physHeightOf(cy int) int { return len(wrapRows(e.disp(cy), e.availWidth())) }
+// physHeightOf is how many physical rows line cy occupies once word-wrapped — or
+// exactly one in aligned mode, where rows never wrap, which is what collapses the
+// whole vertical half of the cursor math (lineTopRow becomes cy, blockHeight the
+// line count).
+func (e *editor) physHeightOf(cy int) int {
+	if e.aligned {
+		return 1
+	}
+	return len(wrapRows(e.disp(cy), e.availWidth()))
+}
+
+// sticky reports whether a pinned column-header row floats above the block — only
+// in aligned mode, with headers on, when line 1 has scrolled off the top. It adds
+// one display row above the block that the editor must redraw and climb past.
+func (e *editor) sticky() bool { return e.aligned && e.r.headers && e.start > 1 }
+
+// headRows is how many rows sit above the block top that the editor manages: the
+// faint status row always, plus the pinned column header when sticky.
+func (e *editor) headRows() int {
+	if e.sticky() {
+		return 2
+	}
+	return 1
+}
+
+// recomputeColW sizes the aligned columns over the whole block — plus the header
+// line when it is pinned, so the floating header shares the body's grid. Widths
+// are over the raw cell text, the same text the aligned editor renders and edits.
+func (e *editor) recomputeColW() {
+	rows := make([][]string, 0, e.count+1)
+	if e.sticky() {
+		if cells, ok := rawCells(e.r.b.lines[0], e.r.delim, e.r.quotes); ok {
+			rows = append(rows, cells)
+		}
+	}
+	for j := 0; j < e.count; j++ {
+		if cells, ok := rawCells(e.lineText(j), e.r.delim, e.r.quotes); ok {
+			rows = append(rows, cells)
+		}
+	}
+	e.colW = colWidths(rows)
+}
 
 // lineTopRow is the physical row offset, from the top of the block, of the first
 // row of logical line cy.
@@ -280,6 +355,17 @@ func (e *editor) blockHeight() int { return e.lineTopRow(e.count) }
 // (past the wrap width, e.g. on a hanging break space) is clamped to the last
 // terminal column.
 func (e *editor) physCursor() (rowOff, chaCol int) {
+	if e.aligned {
+		// One row per line, so the row offset is just cy; the column comes from the
+		// aligned visualCol analog, which maps the raw cursor index across padded
+		// columns. An unparseable line can't happen here — the block is alignable.
+		spans, _ := fieldSpans(e.curLine(), e.r.delim, e.r.quotes)
+		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, e.cx) + 1
+		if chaCol > e.tw() {
+			chaCol = e.tw()
+		}
+		return e.cy, chaCol
+	}
 	base := e.lineTopRow(e.cy)
 	starts := wrapRows(e.disp(e.cy), e.availWidth())
 	r, col := rowOf(starts, visualCol(e.curLine(), e.cx))
@@ -338,6 +424,46 @@ func (e *editor) wordRight() {
 		return
 	}
 	e.moveTo(e.cy, t)
+}
+
+// cellRight jumps the cursor to the start of the next cell — the aligned-mode
+// reading of "skip by the meaningful unit", bound to both Ctrl+Right and Tab (Tab
+// can't insert a literal tab here: in a TSV that tab is the delimiter). From the
+// last cell it wraps to the start of the next row, mirroring wordRight at a line
+// end; navigation only, it never leaves the editor.
+func (e *editor) cellRight() {
+	spans, ok := fieldSpans(e.curLine(), e.r.delim, e.r.quotes)
+	if !ok {
+		return
+	}
+	f := fieldOf(spans, e.cx)
+	if f < len(spans)-1 {
+		e.moveTo(e.cy, spans[f+1].rawStart)
+		return
+	}
+	if e.cy < e.count-1 {
+		e.moveTo(e.cy+1, 0)
+	}
+}
+
+// cellLeft is the mirror, bound to Ctrl+Left and Shift-Tab: to the start of the
+// current cell if the cursor is partway into it, otherwise to the start of the
+// previous cell, wrapping to the end of the previous row at the first cell — the
+// same shape as wordLeft.
+func (e *editor) cellLeft() {
+	spans, ok := fieldSpans(e.curLine(), e.r.delim, e.r.quotes)
+	if !ok {
+		return
+	}
+	f := fieldOf(spans, e.cx)
+	switch {
+	case e.cx > spans[f].rawStart:
+		e.moveTo(e.cy, spans[f].rawStart)
+	case f > 0:
+		e.moveTo(e.cy, spans[f-1].rawStart)
+	case e.cy > 0:
+		e.moveTo(e.cy-1, e.lineLen(e.cy-1))
+	}
 }
 
 // prevWordStart returns the index of the start of the word at or before i: it
@@ -577,8 +703,8 @@ func (e *editor) save() {
 func (e *editor) paintHeader(text string) {
 	curRow, curCol := e.physCursor()
 	out(csiHide)
-	out(cuu(curRow+1) + "\r" + csiEL + text)
-	out(cud(curRow+1) + cha(curCol))
+	out(cuu(curRow+e.headRows()) + "\r" + csiEL + text)
+	out(cud(curRow+e.headRows()) + cha(curCol))
 	out(csiShow)
 }
 
@@ -631,15 +757,31 @@ func (e *editor) redrawLine(prePhysRow int) {
 // below the block, the final upward move is immune to any scroll it triggered.
 func (e *editor) repaintAll(prePhysRow int) {
 	out(csiHide)
-	out(cuu(prePhysRow+1) + "\r") // +1: up to the header row above the block
+	out(cuu(prePhysRow+e.headRows()) + "\r") // up past the block to the status row
 	out(csiEL + e.r.header(e.start, e.start+e.count-1) + "\r\n")
+	if e.sticky() { // the pinned column header, redrawn so it tracks the grid
+		e.emitAligned(1, e.r.b.lines[0])
+	}
 	for j := 0; j < e.count; j++ {
-		emitLine(e.width(), e.start+j, e.lineText(j), e.availWidth())
+		if e.aligned {
+			e.emitAligned(e.start+j, e.lineText(j))
+		} else {
+			emitLine(e.width(), e.start+j, e.lineText(j), e.availWidth())
+		}
 	}
 	out(csiED) // erase the rows a shrink would otherwise strand
 	targetRow, targetCol := e.physCursor()
 	out(cuu(e.blockHeight()-targetRow) + cha(targetCol))
 	out(csiShow)
+}
+
+// emitAligned prints one aligned row — buffer line num, rendered as its raw cells
+// padded to the block grid — for the climbed-in DSV view. Line 1 is drawn faint
+// as the column header, matching the command-line print path's emitAlignedRow.
+func (e *editor) emitAligned(num int, text string) {
+	cells, _ := rawCells(text, e.r.delim, e.r.quotes) // alignable: ok is guaranteed
+	dim := e.r.headers && num == 1
+	emitAlignedRow(e.width(), num, alignRow(cells, e.colW), e.availWidth(), dim)
 }
 
 // --- rune-slice surgery ----------------------------------------------------

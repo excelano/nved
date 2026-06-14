@@ -18,6 +18,7 @@ const (
 	keyEnter
 	keyBackspace
 	keyTab
+	keyShiftTab
 	keyEsc
 	keyUp
 	keyDown
@@ -168,6 +169,8 @@ func classifyCSI(params []byte, final byte) key {
 		return key{kind: keyHome, ctrl: ctrl}
 	case 'F':
 		return key{kind: keyEnd, ctrl: ctrl}
+	case 'Z': // CSI Z — Shift-Tab (back-tab)
+		return key{kind: keyShiftTab}
 	case '~':
 		n := 0
 		if len(nums) >= 1 {

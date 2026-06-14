@@ -189,9 +189,10 @@ func (r *repl) printLines(start, end int) {
 	}
 	out(csiWrapOff)
 	if r.delim != 0 {
-		r.printBlockAligned(start, end) // aligned columns; see dsv.go
+		r.lastAligned = r.printBlockAligned(start, end) // false when it falls back to raw
 	} else {
 		r.printBlockRaw(start, end)
+		r.lastAligned = false
 	}
 	out(csiWrapOn)
 	r.last = &block{start: start, count: end - start + 1}
