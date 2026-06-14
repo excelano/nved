@@ -251,11 +251,14 @@ func (r *repl) readCommand() cmdResult {
 			line = append(line, k.r)
 			out(string(k.r))
 		case keyUp, keyLeft:
-			if len(line) == 0 && r.last != nil {
+			// While a delimiter is set the printed block is an aligned, read-only
+			// view (Phase 1): the editor renders raw, so its geometry wouldn't match
+			// the aligned rows on screen. Climb is re-enabled by dsv off.
+			if len(line) == 0 && r.last != nil && r.delim == 0 {
 				return cmdResult{kind: cmdClimb, climb: k}
 			}
 		case keyHome:
-			if k.ctrl && len(line) == 0 && r.last != nil {
+			if k.ctrl && len(line) == 0 && r.last != nil && r.delim == 0 {
 				return cmdResult{kind: cmdClimb, climb: k}
 			}
 		case keyPageUp:

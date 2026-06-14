@@ -35,6 +35,9 @@ func (r *repl) textWidth() int {
 // the header, sitting above it, is left untouched.
 func (r *repl) availRows() int {
 	a := r.termH - 2
+	if r.delim != 0 && r.headers {
+		a-- // reserve a row for the pinned data header
+	}
 	if a < 1 {
 		a = 1
 	}
@@ -55,8 +58,13 @@ func (r *repl) header(start, end int) string {
 }
 
 // physHeight is how many physical rows buffer line i (1-based) occupies once
-// word-wrapped at the current width.
+// word-wrapped at the current width. In aligned DSV mode rows never wrap — one
+// buffer line is exactly one screen row — so the whole vertical paging math
+// (visibleTail, fillDown, the page windows) collapses to a simple line count.
 func (r *repl) physHeight(i int) int {
+	if r.delim != 0 {
+		return 1
+	}
 	return len(wrapRows([]rune(expandTabs(r.b.lines[i-1])), r.textWidth()))
 }
 

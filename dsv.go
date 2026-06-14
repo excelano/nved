@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"strings"
 	"unicode"
@@ -127,4 +128,181 @@ func onOff(b bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+// --- aligned rendering -----------------------------------------------------
+//
+// The display half: parse a block's lines into fields, size each column to the
+// widest cell, and print rows padded to that grid. This is the command-line
+// print path only — the editor still renders raw, so a delimiter set makes the
+// printed view aligned-and-read-only (climb in via dsv off). Phase 2 brings the
+// cursor math that lets the editor render aligned too.
+
+// splitFields parses one buffer line into its fields. With quotes off it is a
+// plain split on the delimiter. With quotes on it goes through encoding/csv so
+// "a,b" reads as one field; a line that won't parse — an unbalanced quote, i.e.
+// a field whose value continues onto the next buffer line — returns ok=false,
+// the signal to fall back to a raw view rather than render a misleading grid.
+func splitFields(line string, delim rune, quotes bool) (fields []string, ok bool) {
+	if !quotes {
+		return strings.Split(line, string(delim)), true
+	}
+	if line == "" {
+		return []string{""}, true // csv reads a blank line as EOF; treat as one empty field
+	}
+	rd := csv.NewReader(strings.NewReader(line))
+	rd.Comma = delim
+	rd.FieldsPerRecord = -1 // ragged rows are allowed
+	rec, err := rd.Read()
+	if err != nil {
+		return nil, false
+	}
+	return rec, true
+}
+
+// colWidths sizes each column to its widest cell across the given rows. The
+// vector's length is the maximum field count, so ragged rows leave later columns
+// sized by whatever rows do reach them. Widths are block-scoped: the caller
+// passes only the rows on screen (plus the header line), keeping a print O(block).
+func colWidths(rows [][]string) []int {
+	cols := 0
+	for _, row := range rows {
+		if len(row) > cols {
+			cols = len(row)
+		}
+	}
+	w := make([]int, cols)
+	for _, row := range rows {
+		for f, cell := range row {
+			if d := dispWidth(cell); d > w[f] {
+				w[f] = d
+			}
+		}
+	}
+	return w
+}
+
+// alignRow pads each field to its column width and joins with a two-space gap —
+// the expandTabs analog for DSV. Two spaces over box-drawing pipes: quieter,
+// ASCII-safe, and it doesn't compete with the faint gutter. The final column is
+// not padded, so a full-width row carries no trailing whitespace (a ragged short
+// row ends in the empty cells it lacks, which are invisible on screen anyway).
+func alignRow(fields []string, w []int) string {
+	var b strings.Builder
+	for f := 0; f < len(w); f++ {
+		if f > 0 {
+			b.WriteString("  ")
+		}
+		var cell string
+		if f < len(fields) {
+			cell = fields[f]
+		}
+		b.WriteString(cell)
+		if f < len(w)-1 {
+			if pad := w[f] - dispWidth(cell); pad > 0 {
+				b.WriteString(strings.Repeat(" ", pad))
+			}
+		}
+	}
+	return b.String()
+}
+
+// dispWidth is a cell's width in display columns. Like visualCol it counts each
+// rune as one column (double-width CJK included), the same simplification the
+// rest of nved's cursor math makes; acceptable for the narrow files this targets.
+func dispWidth(s string) int { return utf8.RuneCountInString(s) }
+
+// truncateDisplay cuts s to at most max display columns, reporting whether it had
+// to. When it cuts it leaves one column for the caller's overflow marker.
+func truncateDisplay(s string, max int) (string, bool) {
+	if max < 1 {
+		max = 1
+	}
+	if dispWidth(s) <= max {
+		return s, false
+	}
+	return string([]rune(s)[:max-1]), true
+}
+
+// printBlockAligned renders [start,end] as aligned columns: the faint status row,
+// an optional pinned-and-faint header (buffer line 1, when it has scrolled off),
+// then each row padded to the block's column grid and truncated at the right edge
+// with a faint ›. If any line won't parse (a multi-line quoted field), it bails to
+// a raw view with a notice — it never paints a grid it can't stand behind.
+func (r *repl) printBlockAligned(start, end int) {
+	w := r.gutterW()
+	avail := r.termW - (w + 2)
+	if avail < 1 {
+		avail = 1
+	}
+
+	rows := make([][]string, 0, end-start+1)
+	for i := start; i <= end; i++ {
+		fields, ok := splitFields(r.b.lines[i-1], r.delim, r.quotes)
+		if !ok {
+			r.printBlockRawNotice(start, end)
+			return
+		}
+		rows = append(rows, fields)
+	}
+
+	showSticky := r.headers && start > 1
+	var headerFields []string
+	if showSticky {
+		hf, ok := splitFields(r.b.lines[0], r.delim, r.quotes)
+		if !ok {
+			r.printBlockRawNotice(start, end)
+			return
+		}
+		headerFields = hf
+	}
+
+	// Size columns over the block plus the header line, so the pinned header
+	// aligns to the same grid as the body.
+	wRows := rows
+	if showSticky {
+		wRows = append([][]string{headerFields}, rows...)
+	}
+	colW := colWidths(wRows)
+
+	out("\r" + csiEL + r.header(start, end) + "\r\n")
+	if showSticky {
+		emitAlignedRow(w, 1, alignRow(headerFields, colW), avail, true)
+	}
+	for k, fields := range rows {
+		num := start + k
+		// Buffer line 1 is the column header — drawn faint whether it sits at the
+		// top of the block (start == 1) or pinned above it, so it reads the same way.
+		dim := r.headers && num == 1
+		emitAlignedRow(w, num, alignRow(fields, colW), avail, dim)
+	}
+}
+
+// emitAlignedRow prints one gutter-prefixed aligned row, truncated at the right
+// edge with a › marker when it overflows. A dim row (the column header) is drawn
+// entirely faint — number, text, and marker; an ordinary row fainted only in its
+// gutter and overflow marker, like every other printed line.
+func emitAlignedRow(w, num int, aligned string, avail int, dim bool) {
+	text, cut := truncateDisplay(aligned, avail)
+	var row string
+	if dim {
+		row = fmt.Sprintf("%*d  ", w, num) + text
+		if cut {
+			row += "›"
+		}
+		row = faint(row)
+	} else {
+		row = gutterPrefix(w, num) + text
+		if cut {
+			row += faint("›")
+		}
+	}
+	out("\r" + csiEL + row + "\r\n")
+}
+
+// printBlockRawNotice prints a one-line reason and then the block as plain text —
+// the graceful degrade when a block can't be aligned honestly.
+func (r *repl) printBlockRawNotice(start, end int) {
+	out("\r" + csiEL + faint("dsv: unbalanced quote — multi-line field, showing raw") + "\r\n")
+	r.printBlockRaw(start, end)
 }

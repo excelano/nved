@@ -657,6 +657,95 @@ func TestDsvDispatch(t *testing.T) {
 	}
 }
 
+func TestSplitFields(t *testing.T) {
+	// quotes off: a plain split, quotes are ordinary characters.
+	if got, ok := splitFields(`a,b,c`, ',', false); !ok || !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+		t.Errorf("splitFields naive = %q ok=%v", got, ok)
+	}
+	if got, ok := splitFields(`"a,b",c`, ',', false); !ok || !reflect.DeepEqual(got, []string{`"a`, `b"`, "c"}) {
+		t.Errorf("splitFields naive-quoted = %q ok=%v", got, ok)
+	}
+	// quotes on: a quoted field keeps its embedded delimiter.
+	if got, ok := splitFields(`"a,b",c`, ',', true); !ok || !reflect.DeepEqual(got, []string{"a,b", "c"}) {
+		t.Errorf("splitFields quoted = %q ok=%v", got, ok)
+	}
+	// quotes on, ragged rows allowed.
+	if got, ok := splitFields(`a,b,c,d`, ',', true); !ok || len(got) != 4 {
+		t.Errorf("splitFields ragged = %q ok=%v", got, ok)
+	}
+	// an empty line is one empty field, not an EOF error.
+	if got, ok := splitFields("", ',', true); !ok || !reflect.DeepEqual(got, []string{""}) {
+		t.Errorf("splitFields empty = %q ok=%v", got, ok)
+	}
+	// an unbalanced quote signals a multi-line field -> raw fallback.
+	if _, ok := splitFields(`"a,b`, ',', true); ok {
+		t.Error("splitFields unbalanced quote should report ok=false")
+	}
+}
+
+func TestColWidths(t *testing.T) {
+	rows := [][]string{
+		{"name", "age"},
+		{"alice", "30"},
+		{"bob", "7"},
+	}
+	if got := colWidths(rows); !reflect.DeepEqual(got, []int{5, 3}) {
+		t.Errorf("colWidths = %v, want [5 3]", got)
+	}
+	// a ragged row extends the grid; the new column is sized by what reaches it.
+	ragged := [][]string{{"a"}, {"aa", "bbb"}}
+	if got := colWidths(ragged); !reflect.DeepEqual(got, []int{2, 3}) {
+		t.Errorf("colWidths ragged = %v, want [2 3]", got)
+	}
+	// a multi-byte cell counts runes, not bytes.
+	if got := colWidths([][]string{{"ü"}}); !reflect.DeepEqual(got, []int{1}) {
+		t.Errorf("colWidths utf8 = %v, want [1]", got)
+	}
+}
+
+func TestAlignRow(t *testing.T) {
+	w := []int{5, 3}
+	if got := alignRow([]string{"bob", "7"}, w); got != "bob    7" {
+		t.Errorf("alignRow = %q, want %q", got, "bob    7") // "bob"+2pad+2gap+"7", last col unpadded
+	}
+	// a short row renders empty cells for the columns it lacks: "a" padded to
+	// width 5, the 2-space gap, then the empty (unpadded) final column.
+	if got := alignRow([]string{"a"}, w); got != "a"+"    "+"  " {
+		t.Errorf("alignRow short = %q, want %q", got, "a"+"    "+"  ")
+	}
+}
+
+func TestTruncateDisplay(t *testing.T) {
+	if s, cut := truncateDisplay("hello", 10); cut || s != "hello" {
+		t.Errorf("truncate fits = (%q,%v)", s, cut)
+	}
+	if s, cut := truncateDisplay("hello", 3); !cut || s != "he" {
+		t.Errorf("truncate cut = (%q,%v), want (he,true)", s, cut) // leaves one col for the marker
+	}
+}
+
+func TestAlignedPhysHeightIsOne(t *testing.T) {
+	r := newRepl([]string{"a,b,c", "this is a very long field value that would wrap when raw"}, 20, 24)
+	if got := r.physHeight(2); got <= 1 {
+		t.Fatalf("raw physHeight(2) = %d, want > 1 (the long line wraps)", got)
+	}
+	r.delim = ','
+	if got := r.physHeight(2); got != 1 {
+		t.Errorf("aligned physHeight(2) = %d, want 1", got)
+	}
+}
+
+func TestPrintLinesAlignedSmoke(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"name,age", "alice,30", "bob,7"}, 80, 24)
+	r.delim, r.quotes, r.headers = ',', true, true
+	r.printLines(2, 3) // header has scrolled off -> sticky path
+	if r.last == nil || r.last.start != 2 || r.last.count != 2 {
+		t.Fatalf("printLines aligned r.last = %+v, want start=2 count=2", r.last)
+	}
+}
+
 func TestExitAliases(t *testing.T) {
 	// Every alias quits a clean buffer at once.
 	for _, cmd := range []string{"x", "exit", "q", "quit"} {

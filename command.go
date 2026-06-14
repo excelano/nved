@@ -184,18 +184,30 @@ func doExit(b *buffer) bool {
 // reflects the current terminal size, which the editor reuses on a later climb.
 func (r *repl) printLines(start, end int) {
 	r.refreshSize()
-	w := r.gutterW()
-	a := r.textWidth()
 	if fit := r.fillDown(start); end > fit {
 		end = fit
 	}
 	out(csiWrapOff)
+	if r.delim != 0 {
+		r.printBlockAligned(start, end) // aligned columns; see dsv.go
+	} else {
+		r.printBlockRaw(start, end)
+	}
+	out(csiWrapOn)
+	r.last = &block{start: start, count: end - start + 1}
+}
+
+// printBlockRaw prints [start,end] as plain text through the wrap-aware emitLine
+// the editor uses — the default path, and the fallback when a DSV block can't be
+// aligned. It leads with the faint status row, then one gutter-prefixed,
+// word-wrapped block line per buffer line.
+func (r *repl) printBlockRaw(start, end int) {
+	w := r.gutterW()
+	a := r.textWidth()
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	for i := start; i <= end; i++ {
 		emitLine(w, i, r.b.lines[i-1], a)
 	}
-	out(csiWrapOn)
-	r.last = &block{start: start, count: end - start + 1}
 }
 
 // undoAtPrompt reverses the most recent edit from the command line — the path
