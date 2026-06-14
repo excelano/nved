@@ -35,9 +35,15 @@ field sizes its page as if rows don't wrap (`physHeight` returns 1 whenever a
 delimiter is set), so a fallback block of long lines can overflow the screen by a
 row. Rare (no embedded newlines in `rows record` files); a v1 punt.
 
-**Next slices (independent follow-ons, order by what dogfooding makes loud):**
-- **Slice 3 — wrap / horizontal pan** (the wide-table sideways twin of Page-Up/
-  Down; also delivers text-mode `wrap off`). See "Wide tables" below.
+**Slice 3 — wrap / horizontal pan — SHIPPED (local, post-v0.7.0).** 3a: aligned
+DSV blocks wider than the terminal window to the visible columns with faint ‹ / ›
+markers and pan sideways under the cursor, gutter frozen (`hscroll`, `window()`).
+3b: `wrap on|off` (default on, bare reports state) rides the SAME machinery for
+plain text — wrap off gives one row per line with the identical pan. The two views
+now share `oneRowPerLine`/`editor.windowed`, `emitWindowedRow`, and `curVisualCol`.
+Pending: dogfood, then tag v0.7.1.
+
+**Next slice (independent follow-on):**
 - **Slice 4 — structural editing** (`col add`/`col del`), PARKED out of v1. See
   "Structural editing" below.
 
@@ -133,14 +139,14 @@ AND Tab/Shift-Tab both jump by cell (same "jump by meaningful unit" reflex as
 word-skip; Tab also HAD to move off literal-insert — in a TSV, tab is the
 delimiter, so insert-on-Tab was a footgun). Up/Down + Home/End unchanged.
 
-Wide tables: Phase 1 truncates with `›`; **horizontal pan is a planned follow-on
-slice** (sideways twin of vertical Page-Up/Down — same block-reprint + one
-`hscroll` column offset in the cursor math; line-number gutter stays FROZEN;
-cursor pans automatically past the edge). No free terminal h-scrollbar (normal
-screen has none; only alternate-screen apps, which nved refuses). `wrap on|off`
-(default on, bare reports) is really a TEXT-mode setting that rides the SAME
-hscroll machinery — build pan once, get both DSV wide-tables and text `wrap off`.
-Aligned rows never wrap (row-wrap is incoherent; would break the 1-row invariant).
+Wide tables: **SHIPPED (slice 3, above).** Horizontal pan is the sideways twin of
+vertical Page-Up/Down — block-reprint + one `hscroll` column offset in the cursor
+math; line-number gutter stays FROZEN; cursor pans automatically past the edge,
+with a one-column margin so it never lands under a ‹ / › marker. No free terminal
+h-scrollbar (normal screen has none; only alternate-screen apps, which nved
+refuses). The prediction held: `wrap on|off` was really a TEXT-mode setting riding
+the SAME hscroll machinery — built pan once, got both DSV wide-tables and text
+`wrap off`. Aligned (and wrap-off) rows never wrap, by the 1-row-per-line invariant.
 
 Structural editing (add/remove COLUMN) = PARKED, out of v1. Do it in raw mode for
 now (`dsv off`, edit delimiters as text, re-set). If a real need appears: gated
