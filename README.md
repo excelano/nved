@@ -118,8 +118,12 @@ their own:
 
 Each switch invoked bare — `dsv`, `quotes`, `headers`, `rows` — reports its
 current state instead of changing it. Columns are sized to the widest cell on
-screen, and a row wider than the terminal is truncated at the right edge with a
-marker.
+screen, and the delimiter itself is drawn faint in the gap between them, so a row
+reads `a , b` — you see what actually separates the fields, the same reason
+quoted cells keep their quotes. A row wider than the terminal shows a faint `‹`
+or `›` where content runs off the side; climb in and the columns pan sideways to
+follow the cursor, the way Page-Up and Page-Down follow it down the file, with
+the line-number gutter held fixed at the left.
 
 The two ASCII information separators are worth knowing: `unit` (0x1F) for fields
 and `record` (0x1E) for rows never occur in ordinary text, so a file delimited by
