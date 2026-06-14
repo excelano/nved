@@ -324,16 +324,31 @@ func alignRow(fields []string, w []int) string {
 // rest of nved's cursor math makes; acceptable for the narrow files this targets.
 func dispWidth(s string) int { return utf8.RuneCountInString(s) }
 
-// truncateDisplay cuts s to at most max display columns, reporting whether it had
-// to. When it cuts it leaves one column for the caller's overflow marker.
-func truncateDisplay(s string, max int) (string, bool) {
-	if max < 1 {
-		max = 1
+// window slices an aligned row's full-width display text to the avail columns
+// starting at hscroll — the horizontal pan. It returns the visible body plus
+// whether content is hidden to the left (hscroll > 0) and to the right (the row
+// runs past the window); the caller draws a ‹ / › marker in the column each flag
+// reserves, so the body excludes those edge columns. At hscroll 0 with no overflow
+// it returns the whole row and both flags false — the un-panned case.
+func window(s string, hscroll, avail int) (left bool, body string, right bool) {
+	if avail < 1 {
+		avail = 1
 	}
-	if dispWidth(s) <= max {
-		return s, false
+	rs := []rune(s)
+	n := len(rs)
+	left = hscroll > 0
+	right = n > hscroll+avail
+	lo := hscroll
+	if left {
+		lo++ // the ‹ takes the first visible column
 	}
-	return string([]rune(s)[:max-1]), true
+	hi := hscroll + avail
+	if right {
+		hi-- // the › takes the last
+	}
+	lo = clamp(lo, 0, n)
+	hi = clamp(hi, lo, n)
+	return left, string(rs[lo:hi]), right
 }
 
 // rawCells returns each field's raw text — the substring between delimiters, with
@@ -432,36 +447,44 @@ func (r *repl) printBlockAligned(start, end int) bool {
 
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	if showSticky {
-		emitAlignedRow(w, 1, alignRow(headerFields, colW), avail, true)
+		emitAlignedRow(w, 1, 0, avail, alignRow(headerFields, colW), true)
 	}
 	for k, fields := range rows {
 		num := start + k
 		// Buffer line 1 is the column header — drawn faint whether it sits at the
 		// top of the block (start == 1) or pinned above it, so it reads the same way.
 		dim := r.headers && num == 1
-		emitAlignedRow(w, num, alignRow(fields, colW), avail, dim)
+		emitAlignedRow(w, num, 0, avail, alignRow(fields, colW), dim)
 	}
 	return true
 }
 
-// emitAlignedRow prints one gutter-prefixed aligned row, truncated at the right
-// edge with a › marker when it overflows. A dim row (the column header) is drawn
-// entirely faint — number, text, and marker; an ordinary row fainted only in its
-// gutter and overflow marker, like every other printed line.
-func emitAlignedRow(w, num int, aligned string, avail int, dim bool) {
-	text, cut := truncateDisplay(aligned, avail)
-	var row string
+// emitAlignedRow prints one gutter-prefixed aligned row, windowed to the visible
+// columns at the given horizontal pan, with a ‹ / › marker on whichever side hides
+// content. A dim row (the column header) is drawn entirely faint — number, text,
+// and markers; an ordinary row is faint only in its gutter and markers, like every
+// other printed line.
+func emitAlignedRow(w, num, hscroll, avail int, aligned string, dim bool) {
+	left, body, right := window(aligned, hscroll, avail)
 	if dim {
-		row = fmt.Sprintf("%*d  ", w, num) + text
-		if cut {
+		row := fmt.Sprintf("%*d  ", w, num)
+		if left {
+			row += "‹"
+		}
+		row += body
+		if right {
 			row += "›"
 		}
-		row = faint(row)
-	} else {
-		row = gutterPrefix(w, num) + text
-		if cut {
-			row += faint("›")
-		}
+		out("\r" + csiEL + faint(row) + "\r\n")
+		return
+	}
+	row := gutterPrefix(w, num)
+	if left {
+		row += faint("‹")
+	}
+	row += body
+	if right {
+		row += faint("›")
 	}
 	out("\r" + csiEL + row + "\r\n")
 }

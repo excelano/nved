@@ -809,6 +809,32 @@ func TestAlignedCellNav(t *testing.T) {
 	}
 }
 
+func TestAlignedHorizontalPan(t *testing.T) {
+	e := newAlignedEditor(t, []string{"aaaa,bbbb,cccc,dddd,eeee"}, ',', false, false, 0, 0)
+	e.r.termW = 16 // gutter 1 + 2 spaces -> 13 columns of text
+	// At the left edge nothing is hidden, so there is no pan.
+	if e.panToCursor() || e.hscroll != 0 {
+		t.Fatalf("start: pan=true or hscroll=%d, want no pan / 0", e.hscroll)
+	}
+	// Jump to the end of the wide row: it must pan, and the cursor must land back
+	// on screen (past the gutter, within the terminal width).
+	e.cx = e.lineLen(0)
+	if !e.panToCursor() {
+		t.Fatal("cursor at the end of a wide row should pan")
+	}
+	if e.hscroll == 0 {
+		t.Fatal("hscroll should advance past 0")
+	}
+	if _, col := e.physCursor(); col < 4 || col > e.r.termW {
+		t.Errorf("panned cursor col=%d, want within (gutter, %d]", col, e.r.termW)
+	}
+	// Back to the start pans home again.
+	e.cx = 0
+	if !e.panToCursor() || e.hscroll != 0 {
+		t.Errorf("return to start: hscroll=%d, want 0", e.hscroll)
+	}
+}
+
 func TestAlignedHeadRows(t *testing.T) {
 	// header at the top of the block (start 1) is in-block: one head row (status).
 	e := newAlignedEditor(t, []string{"name,age", "a,1"}, ',', false, true, 0, 0)
@@ -965,12 +991,24 @@ func TestAlignRow(t *testing.T) {
 	}
 }
 
-func TestTruncateDisplay(t *testing.T) {
-	if s, cut := truncateDisplay("hello", 10); cut || s != "hello" {
-		t.Errorf("truncate fits = (%q,%v)", s, cut)
+func TestWindow(t *testing.T) {
+	// fits with no pan: whole row, no markers.
+	if l, b, r := window("hello", 0, 10); l || r || b != "hello" {
+		t.Errorf("window fit = (%v,%q,%v), want (false,hello,false)", l, b, r)
 	}
-	if s, cut := truncateDisplay("hello", 3); !cut || s != "he" {
-		t.Errorf("truncate cut = (%q,%v), want (he,true)", s, cut) // leaves one col for the marker
+	// overflow at the left edge: right marker takes the last column.
+	if l, b, r := window("hello", 0, 3); l || !r || b != "he" {
+		t.Errorf("window right cut = (%v,%q,%v), want (false,he,true)", l, b, r)
+	}
+	// panned into the middle: both markers, body is the interior columns.
+	// avail 5 at hscroll 3 over "abcdefghij": ‹ + cols[4..7] + › -> "efg".
+	if l, b, r := window("abcdefghij", 3, 5); !l || !r || b != "efg" {
+		t.Errorf("window mid = (%v,%q,%v), want (true,efg,true)", l, b, r)
+	}
+	// panned to the tail: left marker only, the row ends inside the window. ‹ takes
+	// column 5, so the body starts at column 6 — "gh", with the window's tail blank.
+	if l, b, r := window("abcdefgh", 5, 5); !l || r || b != "gh" {
+		t.Errorf("window tail = (%v,%q,%v), want (true,gh,false)", l, b, r)
 	}
 }
 

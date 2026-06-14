@@ -76,6 +76,13 @@ type editor struct {
 	aligned bool
 	colW    []int
 
+	// hscroll is the horizontal pan offset for the aligned view: the display column
+	// (past the gutter) of the leftmost visible cell column. Aligned rows never
+	// wrap, so a row wider than the terminal is windowed to [hscroll, hscroll+avail)
+	// and the cursor pans it to stay in view. Zero (the default, reset every
+	// climb-in) shows the left edge; the gutter is frozen and never pans.
+	hscroll int
+
 	// flash is set while a save confirmation occupies the header row; the next
 	// key restores the normal header.
 	flash bool
@@ -389,9 +396,10 @@ func (e *editor) physCursor() (rowOff, chaCol int) {
 	if e.aligned {
 		// One row per line, so the row offset is just cy; the column comes from the
 		// aligned visualCol analog, which maps the raw cursor index across padded
-		// columns. An unparseable line can't happen here — the block is alignable.
+		// columns, less the horizontal pan. An unparseable line can't happen here —
+		// the block is alignable.
 		spans := e.alignedSpans(e.curLine())
-		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, e.cx) + 1
+		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, e.cx) - e.hscroll + 1
 		if chaCol > e.tw() {
 			chaCol = e.tw()
 		}
@@ -412,16 +420,42 @@ func (e *editor) physCursor() (rowOff, chaCol int) {
 // moveTo repositions the cursor to (cy, cx), clamping into range. No text
 // changes, so physCursor computed before and after the change agree on the
 // physical layout; the difference gives the relative row move, then an absolute
-// column set.
+// column set. In aligned mode a move that carries the cursor outside the visible
+// window pans the block horizontally instead, which re-windows every row, so it
+// repaints in full rather than emitting a relative cursor hop.
 func (e *editor) moveTo(cy, cx int) {
 	cy = clamp(cy, 0, e.count-1)
 	cx = clamp(cx, 0, e.lineLen(cy))
 	oldRow, _ := e.physCursor()
 	e.cy, e.cx = cy, cx
+	if e.aligned && e.panToCursor() {
+		e.repaintAll(oldRow)
+		return
+	}
 	newRow, newCol := e.physCursor()
 	out(cud(newRow - oldRow))
 	out(cuu(oldRow - newRow))
 	out(cha(newCol))
+}
+
+// panToCursor adjusts hscroll so the cursor stays in the visible window, keeping a
+// one-column margin at each edge for the ‹ / › markers (so the cursor never lands
+// under one). It reports whether hscroll changed — the signal to re-window the
+// whole block. Aligned mode only; the raw editor wraps instead of panning.
+func (e *editor) panToCursor() bool {
+	avail := e.availWidth()
+	spans := e.alignedSpans(e.curLine())
+	v := alignedVisualCol(spans, e.colW, e.cx)
+	old := e.hscroll
+	if v < e.hscroll+1 {
+		e.hscroll = v - 1
+	} else if v > e.hscroll+avail-2 {
+		e.hscroll = v - avail + 2
+	}
+	if e.hscroll < 0 {
+		e.hscroll = 0
+	}
+	return e.hscroll != old
 }
 
 func (e *editor) moveLeft() {
@@ -537,11 +571,12 @@ func (e *editor) finishCharEdit(prePhysRow, preH int) {
 	if e.aligned {
 		// A cell edit can change its column's width, which reflows every later
 		// column on every row — a full repaint with a moving cursor. Recompute the
-		// widths and compare: unchanged means only this one row's text moved, so the
-		// fast single-line redraw still holds.
+		// widths and compare: unchanged, and the cursor still in the visible window,
+		// means only this one row's text moved, so the fast single-line redraw holds.
+		// A width change or a pan re-windows every row, so repaint in full.
 		old := e.colW
 		e.recomputeColW()
-		if sameWidths(old, e.colW) {
+		if sameWidths(old, e.colW) && !e.panToCursor() {
 			e.redrawLine(prePhysRow)
 		} else {
 			e.repaintAll(prePhysRow)
@@ -846,7 +881,7 @@ func (e *editor) repaintAll(prePhysRow int) {
 // as the column header, matching the command-line print path's emitAlignedRow.
 func (e *editor) emitAligned(num int, text string) {
 	dim := e.r.headers && num == 1
-	emitAlignedRow(e.width(), num, alignRow(e.alignedCells(text), e.colW), e.availWidth(), dim)
+	emitAlignedRow(e.width(), num, e.hscroll, e.availWidth(), alignRow(e.alignedCells(text), e.colW), dim)
 }
 
 // --- rune-slice surgery ----------------------------------------------------
