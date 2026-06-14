@@ -9,9 +9,26 @@ the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
 ## Next
 
-The next feature is **native CSV / TSV / DSV handling** (below). The design spec
-is written — `~/Downloads/nved-csv-design-spec.md` — so Phase 1 (CSV-aware
-display) is ready to plan and build. Nothing else is committed-next.
+**CSV / TSV / DSV Phase 1 (display) is built** — `dsv.go` plus the `printLines`
+branch. The field-layer commands (`dsv`/`quotes`/`headers`), the record-layer
+`rows newline|record` reload, the `csv`/`tsv`/`asv` presets, aligned column
+display with a pinned faint header, right-edge truncation, and the
+unbalanced-quote raw fallback all ship. Reachable at startup via `+spec`
+(`nved +csv f`). Not yet released — unversioned on `main`.
+
+Two boundaries this phase deliberately holds (both in the spec):
+- The aligned view is **read-only**: climb-in is gated off while a delimiter is
+  set, because the editor still renders raw and its geometry wouldn't match the
+  aligned rows. Edit via `dsv off`. Lifting this is Phase 2 (the cursor math).
+- The raw fallback for a multi-line quoted field sizes its page as if rows don't
+  wrap (`physHeight` returns 1 whenever a delimiter is set), so a fallback block
+  of long lines can overflow the screen by a row. Rare (no embedded newlines in
+  `rows record` files); a v1 punt.
+
+**The next feature is Phase 2** (field navigation, aligned cell editing, CSV-safe
+save) — see the spec. It depends on Phase 1 (built) and the v0.5.0 buffer-level
+undo (shipped). Or ship Phase 1 as v0.6.0 first and dogfood the aligned view
+before designing the editing details in detail.
 
 (Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo. The undo stack now
 lives on the buffer instead of the editing session, so Ctrl+U works at the `>`
