@@ -683,6 +683,64 @@ func TestSplitFields(t *testing.T) {
 	}
 }
 
+func TestFieldSpans(t *testing.T) {
+	cases := []struct {
+		name   string
+		line   string
+		delim  rune
+		quotes bool
+		want   []fieldSpan
+		ok     bool
+	}{
+		{"naive", `a,b,c`, ',', false, []fieldSpan{{0, 1, "a", false}, {2, 3, "b", false}, {4, 5, "c", false}}, true},
+		{"naive empty", ``, ',', false, []fieldSpan{{0, 0, "", false}}, true},
+		{"naive trailing delim", `a,`, ',', false, []fieldSpan{{0, 1, "a", false}, {2, 2, "", false}}, true},
+		{"naive keeps quotes", `"a,b`, ',', false, []fieldSpan{{0, 2, `"a`, false}, {3, 4, "b", false}}, true},
+		{"quoted simple", `a,b`, ',', true, []fieldSpan{{0, 1, "a", false}, {2, 3, "b", false}}, true},
+		{"quoted embedded delim", `"a,b",c`, ',', true, []fieldSpan{{0, 5, "a,b", true}, {6, 7, "c", false}}, true},
+		{"quoted escaped quote", `"a""b"`, ',', true, []fieldSpan{{0, 6, `a"b`, true}}, true},
+		{"quoted then empty", `"x",`, ',', true, []fieldSpan{{0, 3, "x", true}, {4, 4, "", false}}, true},
+		{"unbalanced quote", `"a,b`, ',', true, nil, false},
+		{"stray after quote", `"a"b`, ',', true, nil, false},
+	}
+	for _, c := range cases {
+		got, ok := fieldSpans(c.line, c.delim, c.quotes)
+		if ok != c.ok {
+			t.Errorf("%s: ok = %v, want %v", c.name, ok, c.ok)
+			continue
+		}
+		if ok && !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: spans = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// fieldSpans must agree with splitFields on the decoded values for well-formed
+// lines — they are two views of one parse, and the editor relies on that.
+func TestFieldSpansMatchSplitFields(t *testing.T) {
+	lines := []string{`a,b,c`, `a,`, ``, `"a,b",c`, `"a""b",x`, `one`}
+	for _, quotes := range []bool{false, true} {
+		for _, line := range lines {
+			spans, sok := fieldSpans(line, ',', quotes)
+			vals, vok := splitFields(line, ',', quotes)
+			if sok != vok {
+				t.Errorf("ok mismatch for %q quotes=%v: spans=%v split=%v", line, quotes, sok, vok)
+				continue
+			}
+			if !sok {
+				continue
+			}
+			got := make([]string, len(spans))
+			for i, s := range spans {
+				got[i] = s.value
+			}
+			if !reflect.DeepEqual(got, vals) {
+				t.Errorf("values for %q quotes=%v: spans=%q split=%q", line, quotes, got, vals)
+			}
+		}
+	}
+}
+
 func TestColWidths(t *testing.T) {
 	rows := [][]string{
 		{"name", "age"},

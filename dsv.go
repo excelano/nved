@@ -206,6 +206,88 @@ func splitFields(line string, delim rune, quotes bool) (fields []string, ok bool
 	return rec, true
 }
 
+// fieldSpan locates one field inside a raw buffer line: rawStart/rawEnd are rune
+// indices bounding the field's raw text — including the surrounding quotes for a
+// quoted field — and value is the decoded cell content (quotes stripped, ""
+// un-escaped). Aligned editing keeps the buffer cursor as a raw rune index; the
+// span is what constrains it to a field's interior and maps it to and from the
+// displayed value.
+type fieldSpan struct {
+	rawStart, rawEnd int
+	value            string
+	quoted           bool
+}
+
+// fieldSpans parses a raw line into its fields with their raw rune ranges — the
+// span-level companion to splitFields, which returns only the values. With quotes
+// off it is a naive split on the delimiter (every field unquoted, range = the
+// value's runes). With quotes on it scans quote-aware: a delimiter inside quotes
+// is part of the value, and a "" pair decodes to one quote. ok is false on an
+// unbalanced quote — the same multi-line-field signal splitFields gives — or on a
+// quoted field followed by stray text, so callers fall back to the raw view
+// rather than trust a malformed parse. It targets well-formed CSV/TSV/DSV; it
+// does not chase every encoding/csv leniency on malformed input.
+func fieldSpans(line string, delim rune, quotes bool) (spans []fieldSpan, ok bool) {
+	rs := []rune(line)
+	n := len(rs)
+	if !quotes {
+		start := 0
+		for i := 0; i <= n; i++ {
+			if i == n || rs[i] == delim {
+				spans = append(spans, fieldSpan{start, i, string(rs[start:i]), false})
+				start = i + 1
+			}
+		}
+		return spans, true
+	}
+	i := 0
+	for {
+		start := i
+		var val strings.Builder
+		quoted := i < n && rs[i] == '"'
+		if quoted {
+			i++ // step over the opening quote
+			closed := false
+			for i < n {
+				if rs[i] == '"' {
+					if i+1 < n && rs[i+1] == '"' { // "" escapes one literal quote
+						val.WriteRune('"')
+						i += 2
+						continue
+					}
+					i++ // the closing quote
+					closed = true
+					break
+				}
+				val.WriteRune(rs[i])
+				i++
+			}
+			if !closed {
+				return nil, false // a quote that runs off the end is a multi-line field
+			}
+			if i < n && rs[i] != delim {
+				return nil, false // stray text after a closed quote — malformed
+			}
+		} else {
+			for i < n && rs[i] != delim {
+				val.WriteRune(rs[i])
+				i++
+			}
+		}
+		spans = append(spans, fieldSpan{start, i, val.String(), quoted})
+		if i < n && rs[i] == delim {
+			i++
+			if i == n { // a trailing delimiter leaves one empty final field
+				spans = append(spans, fieldSpan{n, n, "", false})
+				break
+			}
+			continue
+		}
+		break
+	}
+	return spans, true
+}
+
 // colWidths sizes each column to its widest cell across the given rows. The
 // vector's length is the maximum field count, so ragged rows leave later columns
 // sized by whatever rows do reach them. Widths are block-scoped: the caller
