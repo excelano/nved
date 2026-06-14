@@ -32,6 +32,14 @@ type repl struct {
 	last  *block
 	termW int // terminal width, refreshed when a block is printed
 	termH int // terminal height, used to size a page to one screenful
+
+	// Field-layer DSV state — view-level, never touches the buffer. delim is the
+	// master switch: zero means plain text (no fields, no alignment), any other
+	// rune turns column rendering on. quotes and headers are independent knobs;
+	// the csv/tsv/asv presets set all three at once. See dsv.go.
+	delim   rune
+	quotes  bool
+	headers bool
 }
 
 // block records a printed range so a later climb knows where on screen the

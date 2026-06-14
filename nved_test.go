@@ -575,6 +575,88 @@ func TestSaveArg(t *testing.T) {
 	}
 }
 
+func TestParseDelim(t *testing.T) {
+	cases := []struct {
+		in   string
+		want rune
+		ok   bool
+	}{
+		{",", ',', true},
+		{";", ';', true},
+		{"|", '|', true},
+		{"tab", '\t', true},
+		{"unit", '\x1f', true},
+		{`\t`, 0, false}, // backslash-escape rejected, not interpreted
+		{"ab", 0, false}, // more than one character
+		{"", 0, false},   // empty
+	}
+	for _, c := range cases {
+		got, err := parseDelim(c.in)
+		if (err == nil) != c.ok || (c.ok && got != c.want) {
+			t.Errorf("parseDelim(%q) = (%q, err=%v), want (%q, ok=%v)", c.in, got, err, c.want, c.ok)
+		}
+	}
+}
+
+func TestDsvDispatch(t *testing.T) {
+	r := newRepl([]string{"a,b,c"}, 80, 24)
+
+	// Arguments set the field-layer state, and every one is matched.
+	for _, c := range []struct {
+		cmd  string
+		want rune
+	}{
+		{"dsv ,", ','},
+		{"dsv tab", '\t'},
+		{"dsv unit", '\x1f'},
+		{"dsv off", 0},
+	} {
+		if !r.dsvDispatch(c.cmd) || r.delim != c.want {
+			t.Fatalf("%q -> delim=%q, want %q", c.cmd, r.delim, c.want)
+		}
+	}
+
+	for _, c := range []struct {
+		cmd   string
+		field *bool
+		want  bool
+	}{
+		{"quotes on", &r.quotes, true},
+		{"quotes off", &r.quotes, false},
+		{"headers on", &r.headers, true},
+		{"headers off", &r.headers, false},
+	} {
+		if !r.dsvDispatch(c.cmd) || *c.field != c.want {
+			t.Fatalf("%q -> %v, want %v", c.cmd, *c.field, c.want)
+		}
+	}
+
+	// A rejected delimiter is still a matched dsv command, but leaves state alone.
+	r.delim = ','
+	if !r.dsvDispatch(`dsv \t`) || r.delim != ',' {
+		t.Fatalf(`dsv \t should be rejected without changing delim, got %q`, r.delim)
+	}
+
+	// Bare verbs report state and match.
+	for _, cmd := range []string{"dsv", "quotes", "headers"} {
+		if !r.dsvDispatch(cmd) {
+			t.Errorf("bare %q should match", cmd)
+		}
+	}
+
+	// A non-DSV command falls through so address parsing can handle it.
+	if r.dsvDispatch("5.10") {
+		t.Error("5.10 should not match dsvDispatch")
+	}
+
+	// A matched command clears r.last — its report sits between block and prompt.
+	r.last = &block{start: 1, count: 1}
+	r.dsvDispatch("dsv ,")
+	if r.last != nil {
+		t.Error("a dsv command should clear r.last")
+	}
+}
+
 func TestExitAliases(t *testing.T) {
 	// Every alias quits a clean buffer at once.
 	for _, cmd := range []string{"x", "exit", "q", "quit"} {
