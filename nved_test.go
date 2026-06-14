@@ -1285,6 +1285,26 @@ func TestRowsCommand(t *testing.T) {
 	}
 }
 
+func TestRowsClauseInState(t *testing.T) {
+	// The record layer is invisible in the field-layer state line until it is
+	// non-default. Once the buffer is record-lined, every state report names it,
+	// so "plain text" can't hide a buffer that would save 0x1E-terminated — the
+	// trap that an asv preset followed by dsv off used to spring silently.
+	r := newRepl([]string{"a\x1eb"}, 80, 24)
+	if got := r.dsvState(); got != "delimiter: off — plain text" {
+		t.Errorf("newline-lined off state = %q, want no rows clause", got)
+	}
+	r.b.reline('\x1e')
+	if got := r.dsvState(); got != "delimiter: off — plain text, rows record" {
+		t.Errorf("record-lined off state = %q, want trailing rows clause", got)
+	}
+	r.delim, r.quotes, r.headers = '\x1f', false, true
+	want := "delimiter: unit separator (0x1F), quotes off, headers on, rows record"
+	if got := r.dsvState(); got != want {
+		t.Errorf("record-lined asv state = %q, want %q", got, want)
+	}
+}
+
 func TestPresets(t *testing.T) {
 	// Presets go through dispatch — the same path +spec runs on startup, so
 	// nved +csv f and nved +asv f open straight into the aligned view.

@@ -74,14 +74,17 @@ func (r *repl) preset(delim rune, quotes, headers bool) {
 // setRows switches the record separator. When it actually changes, the buffer is
 // re-lined under the new separator — a reload, not an edit: the undo stack is
 // cleared (the surrounding dsvDispatch clears the on-screen block). A no-op
-// switch to the current separator just reports.
+// switch to the current separator just reports. The message names the line-count
+// change because a separator absent from the file collapses everything to one
+// record (or, in reverse, explodes it), and a silent reline reads as data loss.
 func (r *repl) setRows(sep rune) {
 	if r.b.sep() == sep {
 		emitf("rows: %s\n", rowsName(sep))
 		return
 	}
+	before := len(r.b.lines)
 	r.b.reline(sep)
-	emitf("rows: %s — buffer re-lined, undo cleared\n", rowsName(sep))
+	emitf("rows: %s — re-lined %d → %d lines, undo cleared\n", rowsName(sep), before, len(r.b.lines))
 }
 
 // rowsName is the human name of a record separator for the state report.
@@ -141,10 +144,23 @@ func parseDelim(arg string) (rune, error) {
 // a reminder of what every knob is currently doing.
 func (r *repl) dsvState() string {
 	if r.delim == 0 {
-		return "delimiter: off — plain text"
+		return "delimiter: off — plain text" + rowsClause(r.b.sep())
 	}
-	return fmt.Sprintf("delimiter: %s, quotes %s, headers %s",
-		delimName(r.delim), onOff(r.quotes), onOff(r.headers))
+	return fmt.Sprintf("delimiter: %s, quotes %s, headers %s%s",
+		delimName(r.delim), onOff(r.quotes), onOff(r.headers), rowsClause(r.b.sep()))
+}
+
+// rowsClause names the record layer in a field-layer state line, but only when
+// it is non-default. The record separator is otherwise invisible here, yet it is
+// load-bearing — it is what save writes between records — so a buffer left in
+// "rows record" (e.g. after an asv preset, then dsv off) would read as plain text
+// while a save would silently 0x1E-terminate the file. Surfacing it closes that
+// gap; newline rows are the default and add no noise.
+func rowsClause(sep rune) string {
+	if sep == '\n' {
+		return ""
+	}
+	return ", rows record"
 }
 
 // delimName is the human name of a delimiter rune for the state report: the two
