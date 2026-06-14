@@ -14,12 +14,12 @@ import (
 // Step 1 wires up the state and the commands; the aligned renderer that reads
 // this state lands in step 2.
 
-// dsvDispatch handles the field-layer commands — dsv, quotes, headers — and
-// reports whether s was one of them so the main dispatch can fall through to
-// address parsing when it isn't. A bare verb reports current state; an argument
-// sets it. Like every command that prints below the block, these clear r.last:
-// the report sits between the block and the prompt, so a climb key would no
-// longer land on the right rows.
+// dsvDispatch handles the DSV command family — the field-layer dsv, quotes, and
+// headers, plus the record-layer rows — and reports whether s was one of them so
+// the main dispatch can fall through to address parsing when it isn't. A bare
+// verb reports current state; an argument sets it. Like every command that prints
+// below the block, these clear r.last: the report sits between the block and the
+// prompt, so a climb key would no longer land on the right rows.
 func (r *repl) dsvDispatch(s string) bool {
 	switch {
 	case s == "dsv":
@@ -34,11 +34,40 @@ func (r *repl) dsvDispatch(s string) bool {
 		emitf("headers: %s\n", onOff(r.headers))
 	case strings.HasPrefix(s, "headers "):
 		onOffArg("headers", strings.TrimPrefix(s, "headers "), &r.headers)
+	case s == "rows":
+		emitf("rows: %s\n", rowsName(r.b.sep()))
+	case s == "rows newline":
+		r.setRows('\n')
+	case s == "rows record":
+		r.setRows('\x1e')
+	case strings.HasPrefix(s, "rows "):
+		emitf("nved: rows takes newline or record\n")
 	default:
 		return false
 	}
 	r.last = nil
 	return true
+}
+
+// setRows switches the record separator. When it actually changes, the buffer is
+// re-lined under the new separator — a reload, not an edit: the undo stack is
+// cleared (the surrounding dsvDispatch clears the on-screen block). A no-op
+// switch to the current separator just reports.
+func (r *repl) setRows(sep rune) {
+	if r.b.sep() == sep {
+		emitf("rows: %s\n", rowsName(sep))
+		return
+	}
+	r.b.reline(sep)
+	emitf("rows: %s — buffer re-lined, undo cleared\n", rowsName(sep))
+}
+
+// rowsName is the human name of a record separator for the state report.
+func rowsName(sep rune) string {
+	if sep == '\x1e' {
+		return "record separator (0x1E)"
+	}
+	return "newline"
 }
 
 // setDelim applies a dsv argument: "off" clears the master switch back to plain

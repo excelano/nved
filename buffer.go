@@ -14,6 +14,34 @@ type buffer struct {
 	modified  bool
 	exitArmed bool        // set after the first x on a dirty buffer (warn-twice)
 	undos     []undoEntry // edit history, newest last; see undo.go
+
+	// recSep is the record separator: how bytes split into lines and how lines
+	// join back on save. The zero value means newline (see sep), so plain text
+	// and the test buffers need not set it; rows record switches it to the ASCII
+	// record separator (0x1E). This is the record layer — see dsv.go.
+	recSep rune
+}
+
+// sep is the buffer's record separator, defaulting an unset (zero) recSep to
+// newline so a freshly opened or test-built buffer behaves as ordinary text.
+func (b *buffer) sep() rune {
+	if b.recSep == 0 {
+		return '\n'
+	}
+	return b.recSep
+}
+
+// reline reinterprets the buffer's bytes under a new record separator: rejoin the
+// current lines on the old separator to recover the byte stream, then re-split on
+// the new one. It is lossless and reversible — relining back to the old separator
+// restores the exact lines. Because it redefines what a line is, it behaves like
+// reopening the file: the undo stack, which describes the old line structure, is
+// cleared. The caller resets the on-screen block.
+func (b *buffer) reline(newSep rune) {
+	joined := strings.Join(b.lines, string(b.sep()))
+	b.lines = splitRecords(joined, newSep)
+	b.recSep = newSep
+	b.undos = nil
 }
 
 // openBuffer loads name into a buffer. The bool return is true for the
@@ -34,13 +62,16 @@ func openBuffer(name string) (*buffer, bool, error) {
 	return &buffer{lines: splitLines(data), name: name}, false, nil
 }
 
-// save writes the buffer to its file, one line per record with a trailing
-// newline, and returns the number of lines written.
+// save writes the buffer to its file, one record per line joined by the buffer's
+// record separator (newline by default, the ASCII record separator under rows
+// record), each record followed by a trailing separator, and returns the number
+// of lines written.
 func (b *buffer) save() (int, error) {
+	sep := string(b.sep())
 	var sb strings.Builder
 	for _, ln := range b.lines {
 		sb.WriteString(ln)
-		sb.WriteByte('\n')
+		sb.WriteString(sep)
 	}
 	if err := os.WriteFile(b.name, []byte(sb.String()), 0644); err != nil {
 		return 0, err
@@ -49,13 +80,19 @@ func (b *buffer) save() (int, error) {
 	return len(b.lines), nil
 }
 
-// splitLines turns raw file bytes into lines, dropping a single trailing
-// newline so a newline-terminated file does not gain a phantom empty last
-// line. Empty input becomes one empty line, keeping the buffer non-empty.
+// splitLines turns raw file bytes into lines on newline boundaries — the layout
+// every file opens with, before any rows command.
 func splitLines(data []byte) []string {
-	if len(data) == 0 {
+	return splitRecords(string(data), '\n')
+}
+
+// splitRecords splits s into records on sep, dropping a single trailing
+// separator so a separator-terminated stream does not gain a phantom empty last
+// record. Empty input becomes one empty record, keeping the buffer non-empty.
+func splitRecords(s string, sep rune) []string {
+	if s == "" {
 		return []string{""}
 	}
-	s := strings.TrimSuffix(string(data), "\n")
-	return strings.Split(s, "\n")
+	s = strings.TrimSuffix(s, string(sep))
+	return strings.Split(s, string(sep))
 }

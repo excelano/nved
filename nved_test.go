@@ -746,6 +746,75 @@ func TestPrintLinesAlignedSmoke(t *testing.T) {
 	}
 }
 
+func TestSplitRecords(t *testing.T) {
+	if got := splitRecords("a\x1eb\x1ec", '\x1e'); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+		t.Errorf("splitRecords RS = %q", got)
+	}
+	if got := splitRecords("a\x1eb\x1e", '\x1e'); !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Errorf("splitRecords trailing-RS dropped = %q", got)
+	}
+	if got := splitRecords("", '\x1e'); !reflect.DeepEqual(got, []string{""}) {
+		t.Errorf("splitRecords empty = %q, want one empty record", got)
+	}
+}
+
+func TestRelineRoundTrip(t *testing.T) {
+	// A newline-lined buffer re-lined to RS and back is unchanged, and the undo
+	// stack is cleared by the reload.
+	b := &buffer{lines: []string{"a", "b", "c"}, undos: []undoEntry{{}}}
+	b.reline('\x1e')
+	if b.recSep != '\x1e' || len(b.undos) != 0 {
+		t.Fatalf("reline to RS: recSep=%q undos=%d", b.recSep, len(b.undos))
+	}
+	// On RS, the original newlines are gone — the three records hold no newline,
+	// so a buffer that was one long RS line re-lines into the records.
+	one := &buffer{lines: []string{"a\x1eb\x1ec"}} // a pure-RS file loads as one line
+	one.reline('\x1e')
+	if !reflect.DeepEqual(one.lines, []string{"a", "b", "c"}) {
+		t.Fatalf("reline pure-RS file = %q, want [a b c]", one.lines)
+	}
+	one.reline('\n') // back to newline: no newlines present, collapses to one line
+	if !reflect.DeepEqual(one.lines, []string{"a\x1eb\x1ec"}) {
+		t.Fatalf("reline back to newline = %q, want the one RS-joined line", one.lines)
+	}
+}
+
+func TestSaveRecordSep(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.bin")
+	b := &buffer{name: p, lines: []string{"a", "b", "c"}, recSep: '\x1e'}
+	if _, err := b.save(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a\x1eb\x1ec\x1e" {
+		t.Errorf("save with RS = %q, want RS-joined with trailing RS", data)
+	}
+}
+
+func TestRowsCommand(t *testing.T) {
+	r := newRepl([]string{"a\x1eb\x1ec"}, 80, 24)
+	r.last = &block{start: 1, count: 1}
+	if !r.dsvDispatch("rows record") || r.b.sep() != '\x1e' {
+		t.Fatalf("rows record -> sep=%q", r.b.sep())
+	}
+	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", "c"}) {
+		t.Fatalf("rows record should re-line: %q", r.b.lines)
+	}
+	if r.last != nil {
+		t.Error("rows should clear r.last (a reload resets the block)")
+	}
+	if !r.dsvDispatch("rows newline") || r.b.sep() != '\n' {
+		t.Fatalf("rows newline -> sep=%q", r.b.sep())
+	}
+	// A bad argument is matched (it is a rows command) but changes nothing.
+	if !r.dsvDispatch("rows tab") || r.b.sep() != '\n' {
+		t.Errorf("rows tab should be rejected, sep=%q", r.b.sep())
+	}
+}
+
 func TestExitAliases(t *testing.T) {
 	// Every alias quits a clean buffer at once.
 	for _, cmd := range []string{"x", "exit", "q", "quit"} {
