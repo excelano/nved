@@ -294,29 +294,58 @@ func colWidths(rows [][]string) []int {
 	return w
 }
 
-// alignRow pads each field to its column width and joins with a two-space gap —
-// the expandTabs analog for DSV. Two spaces over box-drawing pipes: quieter,
-// ASCII-safe, and it doesn't compete with the faint gutter. The final column is
-// not padded, so a full-width row carries no trailing whitespace (a ragged short
-// row ends in the empty cells it lacks, which are invisible on screen anyway).
-func alignRow(fields []string, w []int) string {
+// gapWidth is the display width of the inter-column gap. A printable delimiter is
+// shown in the gap — a comma reads as " , " — so the gap is three columns; a
+// non-printable delimiter (tab, the unit separator) can't render inline without
+// breaking the grid, so its gap stays the original two blank columns.
+func gapWidth(delim rune) int {
+	if unicode.IsPrint(delim) {
+		return 3
+	}
+	return 2
+}
+
+// alignRow pads each field to its column width and joins them with the inter-column
+// gap, returning the plain display text and a parallel mask marking the separator-
+// delimiter runes — the ones drawn faint, so a row reads "a , b" and you see the
+// delimiter that is actually in the file. The delimiter is shown only in gaps that
+// exist in this row (between its real fields); the padding gaps a ragged short row
+// gets stay blank, so no phantom delimiter appears past its data. The mask is kept
+// out of the text because the cursor math and the horizontal window slice the text
+// by rune, which embedded SGR codes would corrupt. The final column is not padded,
+// so a full-width row carries no trailing whitespace.
+func alignRow(fields []string, w []int, delim rune) (string, []bool) {
 	var b strings.Builder
+	var sep []bool
+	push := func(s string, isSep bool) {
+		for _, r := range s {
+			b.WriteRune(r)
+			sep = append(sep, isSep)
+		}
+	}
+	gw := gapWidth(delim)
 	for f := 0; f < len(w); f++ {
 		if f > 0 {
-			b.WriteString("  ")
+			if gw == 3 && f < len(fields) { // a real delimiter lives in this gap
+				push(" ", false)
+				push(string(delim), true)
+				push(" ", false)
+			} else {
+				push(strings.Repeat(" ", gw), false)
+			}
 		}
 		var cell string
 		if f < len(fields) {
 			cell = fields[f]
 		}
-		b.WriteString(cell)
+		push(cell, false)
 		if f < len(w)-1 {
 			if pad := w[f] - dispWidth(cell); pad > 0 {
-				b.WriteString(strings.Repeat(" ", pad))
+				push(strings.Repeat(" ", pad), false)
 			}
 		}
 	}
-	return b.String()
+	return b.String(), sep
 }
 
 // dispWidth is a cell's width in display columns. Like visualCol it counts each
@@ -324,31 +353,31 @@ func alignRow(fields []string, w []int) string {
 // rest of nved's cursor math makes; acceptable for the narrow files this targets.
 func dispWidth(s string) int { return utf8.RuneCountInString(s) }
 
-// window slices an aligned row's full-width display text to the avail columns
-// starting at hscroll — the horizontal pan. It returns the visible body plus
-// whether content is hidden to the left (hscroll > 0) and to the right (the row
-// runs past the window); the caller draws a ‹ / › marker in the column each flag
-// reserves, so the body excludes those edge columns. At hscroll 0 with no overflow
-// it returns the whole row and both flags false — the un-panned case.
-func window(s string, hscroll, avail int) (left bool, body string, right bool) {
+// window computes the visible slice of an aligned row of the given rune width to
+// the avail columns starting at hscroll — the horizontal pan. It returns the
+// [lo, hi) rune range to show and whether content is hidden to the left
+// (hscroll > 0) and to the right (the row runs past the window); the caller draws a
+// ‹ / › marker in the column each flag reserves, so the range excludes those edge
+// columns. At hscroll 0 with no overflow it returns the whole row and both flags
+// false — the un-panned case. It returns bounds rather than the substring so the
+// caller can slice the row's faint mask in lockstep.
+func window(width, hscroll, avail int) (left bool, lo, hi int, right bool) {
 	if avail < 1 {
 		avail = 1
 	}
-	rs := []rune(s)
-	n := len(rs)
 	left = hscroll > 0
-	right = n > hscroll+avail
-	lo := hscroll
+	right = width > hscroll+avail
+	lo = hscroll
 	if left {
 		lo++ // the ‹ takes the first visible column
 	}
-	hi := hscroll + avail
+	hi = hscroll + avail
 	if right {
 		hi-- // the › takes the last
 	}
-	lo = clamp(lo, 0, n)
-	hi = clamp(hi, lo, n)
-	return left, string(rs[lo:hi]), right
+	lo = clamp(lo, 0, width)
+	hi = clamp(hi, lo, width)
+	return left, lo, hi, right
 }
 
 // rawCells returns each field's raw text — the substring between delimiters, with
@@ -387,15 +416,16 @@ func fieldOf(spans []fieldSpan, cx int) int {
 // alignedVisualCol is the visualCol analog for aligned columns: the on-screen
 // column (0-based, past the gutter) of a raw cursor index cx. It sums the padded
 // width of every column before the cursor's field — each cell padded to its block
-// column width plus the two-space gap — then adds the cursor's offset inside its
-// own field. The cell renders as its raw text, so that offset is just cx minus the
-// field's raw start; this mirrors alignRow exactly, the way visualCol mirrors
-// expandTabs, keeping the cursor on the character it sits under.
-func alignedVisualCol(spans []fieldSpan, colW []int, cx int) int {
+// column width plus the gap — then adds the cursor's offset inside its own field.
+// The cell renders as its raw text, so that offset is just cx minus the field's raw
+// start; this mirrors alignRow exactly, the way visualCol mirrors expandTabs,
+// keeping the cursor on the character it sits under. gapW must match the gap
+// alignRow drew (gapWidth of the same delimiter) or the cursor drifts.
+func alignedVisualCol(spans []fieldSpan, colW []int, gapW, cx int) int {
 	f := fieldOf(spans, cx)
 	col := 0
 	for g := 0; g < f && g < len(colW); g++ {
-		col += colW[g] + 2
+		col += colW[g] + gapW
 	}
 	if off := cx - spans[f].rawStart; off > 0 {
 		col += off
@@ -447,14 +477,16 @@ func (r *repl) printBlockAligned(start, end int) bool {
 
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	if showSticky {
-		emitAlignedRow(w, 1, 0, avail, alignRow(headerFields, colW), true)
+		text, sep := alignRow(headerFields, colW, r.delim)
+		emitAlignedRow(w, 1, 0, avail, text, sep, true)
 	}
 	for k, fields := range rows {
 		num := start + k
 		// Buffer line 1 is the column header — drawn faint whether it sits at the
 		// top of the block (start == 1) or pinned above it, so it reads the same way.
 		dim := r.headers && num == 1
-		emitAlignedRow(w, num, 0, avail, alignRow(fields, colW), dim)
+		text, sep := alignRow(fields, colW, r.delim)
+		emitAlignedRow(w, num, 0, avail, text, sep, dim)
 	}
 	return true
 }
@@ -464,14 +496,25 @@ func (r *repl) printBlockAligned(start, end int) bool {
 // content. A dim row (the column header) is drawn entirely faint — number, text,
 // and markers; an ordinary row is faint only in its gutter and markers, like every
 // other printed line.
-func emitAlignedRow(w, num, hscroll, avail int, aligned string, dim bool) {
-	left, body, right := window(aligned, hscroll, avail)
+func emitAlignedRow(w, num, hscroll, avail int, aligned string, sep []bool, dim bool) {
+	rs := []rune(aligned)
+	left, lo, hi, right := window(len(rs), hscroll, avail)
+	// A dim row is faint as a whole, so its separators need no per-rune faint; an
+	// ordinary row faints only its separator delimiters (and gutter and markers).
+	var body strings.Builder
+	for i := lo; i < hi; i++ {
+		if sep[i] && !dim {
+			body.WriteString(faint(string(rs[i])))
+		} else {
+			body.WriteRune(rs[i])
+		}
+	}
 	if dim {
 		row := fmt.Sprintf("%*d  ", w, num)
 		if left {
 			row += "‹"
 		}
-		row += body
+		row += body.String()
 		if right {
 			row += "›"
 		}
@@ -482,7 +525,7 @@ func emitAlignedRow(w, num, hscroll, avail int, aligned string, dim bool) {
 	if left {
 		row += faint("‹")
 	}
-	row += body
+	row += body.String()
 	if right {
 		row += faint("›")
 	}

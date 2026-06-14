@@ -733,19 +733,20 @@ func TestFieldOf(t *testing.T) {
 func TestAlignedVisualCol(t *testing.T) {
 	spans, _ := fieldSpans("alice,30,NYC", ',', false) // [0,5] [6,8] [9,12]
 	colW := []int{5, 3, 4}                             // widest cells: alice / age / city-ish
-	// Each column starts past the prior columns padded to colW plus a two-space gap.
+	gw := gapWidth(',')                                // comma is shown -> 3-column gap
+	// Each column starts past the prior columns padded to colW plus the gap.
 	cases := []struct {
 		cx, want int
 	}{
 		{0, 0},   // start of alice
 		{5, 5},   // end of alice
-		{6, 7},   // start of 30: colW[0]=5 + 2 gap
-		{8, 9},   // end of 30
-		{9, 12},  // start of NYC: 5+2 + colW[1]=3 + 2
-		{12, 15}, // end of NYC
+		{6, 8},   // start of 30: colW[0]=5 + 3 gap
+		{8, 10},  // end of 30
+		{9, 14},  // start of NYC: 5+3 + colW[1]=3 + 3
+		{12, 17}, // end of NYC
 	}
 	for _, c := range cases {
-		if got := alignedVisualCol(spans, colW, c.cx); got != c.want {
+		if got := alignedVisualCol(spans, colW, gw, c.cx); got != c.want {
 			t.Errorf("alignedVisualCol cx=%d = %d, want %d", c.cx, got, c.want)
 		}
 	}
@@ -776,7 +777,9 @@ func newAlignedEditor(t *testing.T, lines []string, delim rune, quotes, headers 
 func TestAlignedPhysCursor(t *testing.T) {
 	e := newAlignedEditor(t, []string{"name,age,city", "alice,30,NYC"}, ',', false, true, 1, 0)
 	// gutter width is 1 (two lines), so chaCol = 1 + 2 + visualCol + 1 = visualCol + 4.
-	for _, c := range []struct{ cx, wantCol int }{{0, 4}, {6, 11}, {9, 16}} {
+	// The comma is shown, so columns are 3 apart: alice(5)+3 -> col 8, +30(2)pad to
+	// 3 +3 -> col 14.
+	for _, c := range []struct{ cx, wantCol int }{{0, 4}, {6, 12}, {9, 18}} {
 		e.cx = c.cx
 		row, col := e.physCursor()
 		if row != 1 {
@@ -981,34 +984,87 @@ func TestColWidths(t *testing.T) {
 
 func TestAlignRow(t *testing.T) {
 	w := []int{5, 3}
-	if got := alignRow([]string{"bob", "7"}, w); got != "bob    7" {
-		t.Errorf("alignRow = %q, want %q", got, "bob    7") // "bob"+2pad+2gap+"7", last col unpadded
+	// the comma is shown in the gap: "bob" padded to 5, then " , ", then the last
+	// cell unpadded.
+	text, sep := alignRow([]string{"bob", "7"}, w, ',')
+	if text != "bob   , 7" {
+		t.Errorf("alignRow = %q, want %q", text, "bob   , 7")
 	}
-	// a short row renders empty cells for the columns it lacks: "a" padded to
-	// width 5, the 2-space gap, then the empty (unpadded) final column.
-	if got := alignRow([]string{"a"}, w); got != "a"+"    "+"  " {
-		t.Errorf("alignRow short = %q, want %q", got, "a"+"    "+"  ")
+	if rs := []rune(text); !sep[6] || rs[6] != ',' {
+		t.Errorf("sep should mark the comma at index 6, got rune %q sep %v", rs[6], sep[6])
+	}
+	for i, s := range sep {
+		if s && i != 6 {
+			t.Errorf("only the comma should be masked, but sep[%d] is set too", i)
+		}
+	}
+	// a short row gets a blank padding gap for the column it lacks — no phantom
+	// delimiter past its data: "a" padded to 5, then three blank columns.
+	short, sshort := alignRow([]string{"a"}, w, ',')
+	if short != "a"+strings.Repeat(" ", 7) {
+		t.Errorf("alignRow short = %q, want %q", short, "a"+strings.Repeat(" ", 7))
+	}
+	for i, s := range sshort {
+		if s {
+			t.Errorf("short row should mask nothing, but sep[%d] is set", i)
+		}
+	}
+	// a non-printable delimiter keeps the original two-space gap, no inline char.
+	tabbed, stab := alignRow([]string{"bob", "7"}, w, '\t')
+	if tabbed != "bob    7" {
+		t.Errorf("alignRow tab = %q, want %q", tabbed, "bob    7")
+	}
+	for _, s := range stab {
+		if s {
+			t.Error("tab delimiter should mask nothing")
+		}
+	}
+	// a comma inside a quoted cell is data: only the separator comma is masked, even
+	// though the cell text holds one too.
+	q, sq := alignRow([]string{`"a,b"`, "c"}, []int{5, 1}, ',')
+	rs := []rune(q)
+	masked := 0
+	for i, s := range sq {
+		if s {
+			masked++
+			if rs[i] != ',' {
+				t.Errorf("masked rune %q is not a comma", rs[i])
+			}
+		}
+	}
+	if masked != 1 {
+		t.Errorf("only the separator comma should be masked, got %d in %q", masked, q)
+	}
+}
+
+func TestEmitAlignedRowShowsFaintDelim(t *testing.T) {
+	var buf strings.Builder
+	old := screen
+	screen = &buf
+	t.Cleanup(func() { screen = old })
+	text, sep := alignRow([]string{"a", "b"}, []int{1, 1}, ',')
+	emitAlignedRow(1, 1, 0, 40, text, sep, false)
+	if got := buf.String(); !strings.Contains(got, faint(",")) {
+		t.Errorf("rendered row should contain a faint comma, got %q", got)
 	}
 }
 
 func TestWindow(t *testing.T) {
 	// fits with no pan: whole row, no markers.
-	if l, b, r := window("hello", 0, 10); l || r || b != "hello" {
-		t.Errorf("window fit = (%v,%q,%v), want (false,hello,false)", l, b, r)
+	if l, lo, hi, r := window(5, 0, 10); l || r || lo != 0 || hi != 5 {
+		t.Errorf("window fit = (%v,%d,%d,%v), want (false,0,5,false)", l, lo, hi, r)
 	}
-	// overflow at the left edge: right marker takes the last column.
-	if l, b, r := window("hello", 0, 3); l || !r || b != "he" {
-		t.Errorf("window right cut = (%v,%q,%v), want (false,he,true)", l, b, r)
+	// overflow at the right: marker takes the last column, body is [0,2).
+	if l, lo, hi, r := window(5, 0, 3); l || !r || lo != 0 || hi != 2 {
+		t.Errorf("window right cut = (%v,%d,%d,%v), want (false,0,2,true)", l, lo, hi, r)
 	}
-	// panned into the middle: both markers, body is the interior columns.
-	// avail 5 at hscroll 3 over "abcdefghij": ‹ + cols[4..7] + › -> "efg".
-	if l, b, r := window("abcdefghij", 3, 5); !l || !r || b != "efg" {
-		t.Errorf("window mid = (%v,%q,%v), want (true,efg,true)", l, b, r)
+	// panned into the middle of a 10-wide row: both markers, body is [4,7).
+	if l, lo, hi, r := window(10, 3, 5); !l || !r || lo != 4 || hi != 7 {
+		t.Errorf("window mid = (%v,%d,%d,%v), want (true,4,7,true)", l, lo, hi, r)
 	}
-	// panned to the tail: left marker only, the row ends inside the window. ‹ takes
-	// column 5, so the body starts at column 6 — "gh", with the window's tail blank.
-	if l, b, r := window("abcdefgh", 5, 5); !l || r || b != "gh" {
-		t.Errorf("window tail = (%v,%q,%v), want (true,gh,false)", l, b, r)
+	// panned to the tail of an 8-wide row: left marker only, body [6,8).
+	if l, lo, hi, r := window(8, 5, 5); !l || r || lo != 6 || hi != 8 {
+		t.Errorf("window tail = (%v,%d,%d,%v), want (true,6,8,false)", l, lo, hi, r)
 	}
 }
 

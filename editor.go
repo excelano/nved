@@ -399,7 +399,7 @@ func (e *editor) physCursor() (rowOff, chaCol int) {
 		// columns, less the horizontal pan. An unparseable line can't happen here —
 		// the block is alignable.
 		spans := e.alignedSpans(e.curLine())
-		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, e.cx) - e.hscroll + 1
+		chaCol = e.width() + 2 + alignedVisualCol(spans, e.colW, gapWidth(e.r.delim), e.cx) - e.hscroll + 1
 		if chaCol > e.tw() {
 			chaCol = e.tw()
 		}
@@ -445,7 +445,7 @@ func (e *editor) moveTo(cy, cx int) {
 func (e *editor) panToCursor() bool {
 	avail := e.availWidth()
 	spans := e.alignedSpans(e.curLine())
-	v := alignedVisualCol(spans, e.colW, e.cx)
+	v := alignedVisualCol(spans, e.colW, gapWidth(e.r.delim), e.cx)
 	old := e.hscroll
 	if v < e.hscroll+1 {
 		e.hscroll = v - 1
@@ -881,7 +881,8 @@ func (e *editor) repaintAll(prePhysRow int) {
 // as the column header, matching the command-line print path's emitAlignedRow.
 func (e *editor) emitAligned(num int, text string) {
 	dim := e.r.headers && num == 1
-	emitAlignedRow(e.width(), num, e.hscroll, e.availWidth(), alignRow(e.alignedCells(text), e.colW), dim)
+	aligned, sep := alignRow(e.alignedCells(text), e.colW, e.r.delim)
+	emitAlignedRow(e.width(), num, e.hscroll, e.availWidth(), aligned, sep, dim)
 }
 
 // --- rune-slice surgery ----------------------------------------------------
