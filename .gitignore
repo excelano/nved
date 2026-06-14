@@ -12,5 +12,4 @@ go.work
 go.work.sum
 
 # Scratch fixtures used while dogfooding
-/test.txt
-/test1000.txt
+/test_files/
