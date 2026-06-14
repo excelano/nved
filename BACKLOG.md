@@ -9,32 +9,42 @@ the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
 ## Next
 
-**CSV / TSV / DSV Phase 1 (display) is built** — `dsv.go` plus the `printLines`
-branch. The field-layer commands (`dsv`/`quotes`/`headers`), the record-layer
-`rows newline|record` reload, the `csv`/`tsv`/`asv` presets, aligned column
-display with a pinned faint header, right-edge truncation, and the
-unbalanced-quote raw fallback all ship. Reachable at startup via `+spec`
-(`nved +csv f`). Not yet released — unversioned on `main`.
+**CSV / TSV / DSV Phase 1 (display) shipped in v0.6.0** and **Phase 2 (aligned
+cell editing) in v0.7.0.** The field-layer commands (`dsv`/`quotes`/`headers`),
+the record-layer `rows newline|record` reload, the `csv`/`tsv`/`asv` presets,
+aligned column display with a pinned faint header, right-edge truncation, the
+unbalanced-quote raw fallback, and now climb-in cell editing with
+reflow-on-keystroke all ship. Reachable at startup via `+spec` (`nved +csv f`).
 
-Two boundaries this phase deliberately holds (both in the spec):
-- The aligned view is **read-only**: climb-in is gated off while a delimiter is
-  set, because the editor still renders raw and its geometry wouldn't match the
-  aligned rows. Edit via `dsv off`. Lifting this is Phase 2 (the cursor math).
-- The raw fallback for a multi-line quoted field sizes its page as if rows don't
-  wrap (`physHeight` returns 1 whenever a delimiter is set), so a fallback block
-  of long lines can overflow the screen by a row. Rare (no embedded newlines in
-  `rows record` files); a v1 punt.
+The Phase 2 build departed from the spec in one load-bearing way (David's call):
+the display is **always raw** — both print and climb-in render the literal cell
+text, so a quoted field shows its quotes everywhere and `quotes on|off` only
+controls field *splitting*, never display stripping. That eliminated the
+decoded-value path (`splitFields` deleted), made the climb-in view identical to
+the print, and made save a **verbatim line-join** — a quoted field round-trips
+with its quotes intact, no `encoding/csv` re-serialization needed (the spec's
+"CSV-safe save" turned out to be free). Editing is values-only: the delimiter
+key is swallowed, `Enter`-split and row joins are suppressed; `dsv off` for
+structural edits. The only new cursor machinery is the horizontal
+`alignedVisualCol` (the `visualCol` analog parameterized by the block's
+column-width vector) — aligning turns wrap off, so the vertical math collapses
+to 1 buffer line = 1 row, exactly as the spec predicted.
 
-**The next feature is Phase 2** (field navigation, aligned cell editing, CSV-safe
-save) — see the spec. It depends on Phase 1 (built) and the v0.5.0 buffer-level
-undo (shipped). Or ship Phase 1 as v0.6.0 first and dogfood the aligned view
-before designing the editing details in detail.
+One boundary still held from Phase 1: the raw fallback for a multi-line quoted
+field sizes its page as if rows don't wrap (`physHeight` returns 1 whenever a
+delimiter is set), so a fallback block of long lines can overflow the screen by a
+row. Rare (no embedded newlines in `rows record` files); a v1 punt.
 
-(Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo. The undo stack now
-lives on the buffer instead of the editing session, so Ctrl+U works at the `>`
-prompt and survives climbing in and out; an undo of an edit that has scrolled
-off-screen reprints it. The four inverse closures capture absolute buffer
-indices instead of session-relative `cy`/`cx`.)
+**Next slices (independent follow-ons, order by what dogfooding makes loud):**
+- **Slice 3 — wrap / horizontal pan** (the wide-table sideways twin of Page-Up/
+  Down; also delivers text-mode `wrap off`). See "Wide tables" below.
+- **Slice 4 — structural editing** (`col add`/`col del`), PARKED out of v1. See
+  "Structural editing" below.
+
+(Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo — the stack lives on the
+buffer, so Ctrl+U works at the `>` prompt, survives climbing in and out, and
+reprints an off-screen edit. Cell edits and reflow compose with it for free,
+since widths derive from text.)
 
 ---
 

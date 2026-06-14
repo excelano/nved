@@ -242,17 +242,20 @@ func printHelp() {
   h  help     show this help            (also H, ?)
 DSV view (opt-in; a file opens as plain text):
   dsv C       show lines as columns split on C — a character, or tab / unit
-  dsv off     back to plain text (and climbable for editing)
+  dsv off     back to plain text
   quotes on|off    respect "quoted,fields" when splitting
   headers on|off   pin line 1 as a faint column header
   rows newline|record   record separator (record = ASCII 0x1E)
   csv tsv asv      presets; asv = unit fields + record rows
 a bare dsv / quotes / headers / rows reports its current state.
-the aligned view is read-only — dsv off to climb in and edit.
+climb into an aligned block to edit cells in place: edits change the field
+value only — the delimiter key, Enter-split and row joins are suppressed
+(dsv off for structural edits).
 out-of-range numbers clamp to the nearest valid line.
 a , can be used in place of . in any range.
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
-Ctrl+Left / Ctrl+Right skip the cursor back / forward by words while editing;
+Ctrl+Left / Ctrl+Right skip back / forward by words — by field, with Tab /
+Shift-Tab, in an aligned view;
 Page-Up / Page-Down reprint the screenful above / below to climb into that;
 Ctrl+S (save in place) and Ctrl+X (exit) work while editing too;
 Ctrl+U undoes the last edit — at the prompt or while editing, and across

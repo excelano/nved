@@ -133,9 +133,14 @@ nved +csv data.csv
 nved +asv data.bin
 ```
 
-The aligned view is read-only in this version: to edit, `dsv off` back to plain
-text, change the values, then set the delimiter again. Aligned editing — moving
-the cursor cell to cell — is the next step.
+Climb into an aligned block and you edit it in place, cell by cell. `Tab` and
+`Shift-Tab` (or `Ctrl-Left` / `Ctrl-Right`) move field to field, and the grid
+re-aligns as you type — widen one cell and the columns below it shift to match.
+Editing changes the field value only: the delimiter key is swallowed, and
+`Enter`-split and row joins are suppressed, so you can't accidentally restructure
+the file from inside a cell. For structural edits — splitting a row, adding a
+column — `dsv off` back to plain text. A quoted field keeps its quotes on screen
+and on save, so you always see which cells are quoted and which aren't.
 
 ## License
 
