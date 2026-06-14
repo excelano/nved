@@ -822,6 +822,87 @@ func TestAlignedHeadRows(t *testing.T) {
 	}
 }
 
+func TestAlignedInsert(t *testing.T) {
+	e := newAlignedEditor(t, []string{"a,bb,c"}, ',', false, false, 0, 1) // after 'a'
+	e.insert('X')
+	if e.r.b.lines[0] != "aX,bb,c" || e.cx != 2 {
+		t.Errorf("after insert: line=%q cx=%d, want %q/2", e.r.b.lines[0], e.cx, "aX,bb,c")
+	}
+	if !e.r.b.modified {
+		t.Error("insert should mark the buffer modified")
+	}
+}
+
+func TestAlignedReflowWidens(t *testing.T) {
+	// col0 spans "a" and "bb" -> width 2. Growing line 1's first cell past that must
+	// widen the column (the reflow trigger that picks a full repaint over a redraw).
+	e := newAlignedEditor(t, []string{"a,x", "bb,y"}, ',', false, false, 0, 1)
+	before := e.colW[0]
+	e.insert('a')
+	e.insert('a') // "aaa,x"
+	if e.colW[0] <= before {
+		t.Errorf("col0 width should grow past %d, got %d", before, e.colW[0])
+	}
+}
+
+func TestAlignedBackspaceChar(t *testing.T) {
+	e := newAlignedEditor(t, []string{"ab,c"}, ',', false, false, 0, 2) // after "ab"
+	e.backspace()
+	if e.r.b.lines[0] != "a,c" || e.cx != 1 {
+		t.Errorf("backspace mid-cell: line=%q cx=%d, want %q/1", e.r.b.lines[0], e.cx, "a,c")
+	}
+}
+
+func TestAlignedStructuralEditsGuarded(t *testing.T) {
+	// Backspace at a row's start would join rows; Delete at a row's end would pull
+	// the next row up. Both are structural — suppressed in aligned mode.
+	e := newAlignedEditor(t, []string{"a,b", "c,d"}, ',', false, false, 1, 0) // start of row 2
+	e.backspace()
+	if len(e.r.b.lines) != 2 || e.r.b.lines[0] != "a,b" {
+		t.Errorf("backspace at row start should be a no-op, got %q", e.r.b.lines)
+	}
+	e.cy, e.cx = 0, 3 // end of row 1 ("a,b")
+	e.del()
+	if len(e.r.b.lines) != 2 {
+		t.Errorf("del at row end should be a no-op, got %q", e.r.b.lines)
+	}
+}
+
+func TestAlignedSaveVerbatim(t *testing.T) {
+	// Always-raw means save is a verbatim join: a quoted field round-trips with its
+	// quotes intact, no re-serialization pass.
+	p := filepath.Join(t.TempDir(), "f.csv")
+	e := newAlignedEditor(t, []string{"name,note", `bob,"a,b"`}, ',', true, true, 1, 0)
+	e.r.b.name = p
+	e.insert('B') // bob -> Bbob, leaving the quoted note untouched
+	if _, err := e.r.b.save(); err != nil {
+		t.Fatal(err)
+	}
+	b2, _, err := openBuffer(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"name,note", `Bbob,"a,b"`}
+	if !reflect.DeepEqual(b2.lines, want) {
+		t.Errorf("round-trip = %q, want %q", b2.lines, want)
+	}
+}
+
+func TestAlignedUnbalancedQuoteNoCrash(t *testing.T) {
+	// Typing a lone quote leaves the line transiently unparseable; the editor must
+	// render and navigate it as one raw cell rather than panic.
+	e := newAlignedEditor(t, []string{`a,"b"`}, ',', true, false, 0, 0)
+	e.insert('"') // `"a,"b"` — odd number of quotes
+	cells := e.alignedCells(e.curLine())
+	if len(cells) != 1 || cells[0] != `"a,"b"` {
+		t.Errorf("unbalanced line should be one raw cell, got %q", cells)
+	}
+	e.cx = len([]rune(e.curLine()))
+	if _, col := e.physCursor(); col < 1 {
+		t.Errorf("physCursor on unbalanced line returned col %d", col)
+	}
+}
+
 func TestColWidths(t *testing.T) {
 	rows := [][]string{
 		{"name", "age"},
