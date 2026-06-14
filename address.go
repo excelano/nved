@@ -13,7 +13,9 @@ import (
 // Forms: "5" (one line), "1.3" (range), "." (all), "$" (the last line), with an
 // empty side of the separator defaulting to 1 on the left and $ on the right — so
 // "N." is N to the end and ".N" is the start to N. The "$" terminator still parses
-// ("1.$"), but "1." and "." are the simpler everyday forms.
+// ("1.$"), but "1." and "." are the simpler everyday forms. Either endpoint may
+// be offset from "$": "$-9.$" is the last ten lines, "$-20.$-10" a window before
+// the end.
 //
 // The "." is the default separator because it sits under the right hand on the
 // numeric keypad where there is no comma; addresses are all digits, so "5.20"
@@ -42,12 +44,23 @@ func parseAddress(s string, n int) (start, end int, ok bool) {
 	return a, b, true
 }
 
-// resolveAddr turns a single address ("$" or a line number) into a clamped
-// 1-based line index.
+// resolveAddr turns a single address into a clamped 1-based line index. It
+// accepts a line number ("5"), the last line ("$"), and the last line offset by
+// a signed count ("$-9", "$+2") — ed-style address arithmetic restricted to the
+// "$" anchor, since nved has no current line to offset from. "$-9" is nine lines
+// before the end; the result clamps into [1, n], so "$+2" is just "$".
 func resolveAddr(s string, n int) (int, bool) {
 	s = strings.TrimSpace(s)
 	if s == "$" {
 		return n, true
+	}
+	if off, ok := strings.CutPrefix(s, "$"); ok {
+		// off is the signed remainder, e.g. "-9" or "+2"; Atoi reads the sign.
+		d, err := strconv.Atoi(off)
+		if err != nil {
+			return 0, false
+		}
+		return clamp(n+d, 1, n), true
 	}
 	v, err := strconv.Atoi(s)
 	if err != nil {

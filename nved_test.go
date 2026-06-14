@@ -59,11 +59,17 @@ func TestParseAddress(t *testing.T) {
 		{",$", 10, 1, 10, true},
 		{"3,", 10, 3, 10, true},
 		{"$,$", 4, 4, 4, true},
-		{".", 10, 1, 10, true},  // dot is an alias for the comma: all lines
-		{"1.3", 10, 1, 3, true}, // dot range
-		{"3.", 10, 3, 10, true}, // dot to the end
-		{".5", 10, 1, 5, true},  // start to dot
-		{"5.2", 10, 2, 5, true}, // reversed dot range swapped
+		{".", 10, 1, 10, true},        // dot is an alias for the comma: all lines
+		{"1.3", 10, 1, 3, true},       // dot range
+		{"3.", 10, 3, 10, true},       // dot to the end
+		{".5", 10, 1, 5, true},        // start to dot
+		{"5.2", 10, 2, 5, true},       // reversed dot range swapped
+		{"$-9", 100, 91, 91, true},    // offset from the last line
+		{"$-9.$", 100, 91, 100, true}, // last ten lines
+		{"$-200", 100, 1, 1, true},    // offset underflow clamps to line 1
+		{"$+5", 100, 100, 100, true},  // offset past the end clamps to $
+		{"$-20.$-10", 100, 80, 90, true},
+		{"$-x", 100, 0, 0, false}, // malformed offset
 		{"abc", 10, 0, 0, false},
 		{"1,x", 10, 0, 0, false},
 	}
@@ -73,6 +79,47 @@ func TestParseAddress(t *testing.T) {
 			t.Errorf("parseAddress(%q, %d) = (%d,%d,%v), want (%d,%d,%v)",
 				c.in, c.n, gs, ge, ok, c.wStart, c.wEnd, c.ok)
 		}
+	}
+}
+
+func TestHeadTail(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "x"
+	}
+	r := newRepl(lines, 80, 10)
+
+	// Count branches are deterministic — no terminal read.
+	cases := []struct {
+		in           string
+		wStart, wEnd int
+		ok, matched  bool
+	}{
+		{"head", 1, 100, true, true},     // bare: whole file, printLines caps it
+		{"head 3", 1, 3, true, true},     // first N
+		{"head 500", 1, 100, true, true}, // count past the end clamps
+		{"tail 10", 91, 100, true, true}, // last N
+		{"tail 500", 1, 100, true, true}, // count past the end clamps to line 1
+		{"head 0", 0, 0, false, true},    // non-positive count
+		{"tail -1", 0, 0, false, true},   // non-positive count
+		{"tail abc", 0, 0, false, true},  // malformed count
+		{"tailor", 0, 0, false, false},   // not a head/tail command
+		{"headphones", 0, 0, false, false},
+		{"5.10", 0, 0, false, false},
+	}
+	for _, c := range cases {
+		gs, ge, ok, matched := r.headTail(c.in)
+		if matched != c.matched || ok != c.ok || (ok && (gs != c.wStart || ge != c.wEnd)) {
+			t.Errorf("headTail(%q) = (%d,%d,ok=%v,matched=%v), want (%d,%d,ok=%v,matched=%v)",
+				c.in, gs, ge, ok, matched, c.wStart, c.wEnd, c.ok, c.matched)
+		}
+	}
+
+	// Bare tail ends at the last line and starts on a valid line; the exact
+	// screenful top depends on the live terminal size (see TestVisibleTailAndFillDown).
+	gs, ge, ok, matched := r.headTail("tail")
+	if !matched || !ok || ge != 100 || gs < 1 || gs > 100 {
+		t.Errorf(`headTail("tail") = (%d,%d,ok=%v,matched=%v), want end=100, 1<=start<=100`, gs, ge, ok, matched)
 	}
 }
 

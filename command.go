@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,15 @@ func (r *repl) dispatch(line string) bool {
 	}
 	// Any command other than a repeated exit disarms the exit warning.
 	b.exitArmed = false
+	if start, end, ok, matched := r.headTail(s); matched {
+		if ok {
+			r.printLines(start, end)
+		} else {
+			emit("nved: head/tail takes a positive line count — type h for help\n")
+			r.last = nil
+		}
+		return false
+	}
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
 		r.printLines(start, end)
 	} else {
@@ -54,6 +64,51 @@ func (r *repl) dispatch(line string) bool {
 		r.last = nil
 	}
 	return false
+}
+
+// headTail parses the head/tail shorthands and returns the inclusive range to
+// print. Bare "head"/"tail" show one screenful from the top / bottom (printLines
+// caps a from-the-top range to a screenful; the bottom screenful is sized with
+// visibleTail). An optional count — "head 30", "tail 10" — overrides it: "tail N"
+// is the last N lines, which is why $-N addressing had to exist underneath. ok is
+// false when the verb matched but the count was not a positive number; matched is
+// false when s is not a head/tail command at all, so dispatch falls through to
+// address parsing (a word like "tailor" matches neither).
+func (r *repl) headTail(s string) (start, end int, ok, matched bool) {
+	n := len(r.b.lines)
+	for _, verb := range []string{"head", "tail"} {
+		count, hasCount := 0, false
+		switch {
+		case s == verb:
+			// no count
+		case strings.HasPrefix(s, verb+" "):
+			c, err := strconv.Atoi(strings.TrimSpace(s[len(verb):]))
+			if err != nil || c < 1 {
+				return 0, 0, false, true
+			}
+			count, hasCount = c, true
+		default:
+			continue
+		}
+		if verb == "head" {
+			start = 1
+			if hasCount {
+				end = clamp(count, 1, n)
+			} else {
+				end = n // printLines caps this to one screenful from the top
+			}
+		} else { // tail
+			end = n
+			if hasCount {
+				start = clamp(n-count+1, 1, n)
+			} else {
+				r.refreshSize()
+				start = r.visibleTail(1, n) // top of the last screenful
+			}
+		}
+		return start, end, true, true
+	}
+	return 0, 0, false, false
 }
 
 // saveArg reports whether s is a save command — "s" or "save", optionally
@@ -146,7 +201,9 @@ func printHelp() {
   N.M         print lines N..M
   N.   .N     print N to the end / the start to N
   .           print all lines
-  $           print the last line
+  $   $-N     print the last line / the Nth line before it
+  head [N]    print the first screenful, or the first N lines
+  tail [N]    print the last screenful, or the last N lines
   s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
   x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)

@@ -44,20 +44,39 @@ Requires Go 1.25 or newer.
 Start `nved` with a file name, or with no argument for an empty unnamed buffer.
 At the `>` prompt you address lines by number:
 
-| Command   | Effect                                  |
-|-----------|-----------------------------------------|
-| `N`       | print line N                            |
-| `N.M`     | print lines N through M                 |
-| `N.`      | print from line N to the end            |
-| `.N`      | print from the start to line N          |
-| `.`       | print the whole file                    |
-| `$`       | print the last line                     |
-| `s [name]`| save; a name is required when unnamed (also `Ctrl+S`) |
-| `x`       | exit; warns once when dirty (also `Ctrl+X`, `q`, `quit`) |
-| `h`       | show the command and key reference (also `H`, `?`) |
+| Command    | Effect                                  |
+|------------|-----------------------------------------|
+| `N`        | print line N                            |
+| `N.M`      | print lines N through M                 |
+| `N.`       | print from line N to the end            |
+| `.N`       | print from the start to line N          |
+| `.`        | print the whole file                    |
+| `$`        | print the last line                     |
+| `$-N`      | print the Nth line before the last      |
+| `head [N]` | print the first screenful, or the first N lines |
+| `tail [N]` | print the last screenful, or the last N lines |
+| `s [name]` | save; a name is required when unnamed (also `Ctrl+S`) |
+| `x`        | exit; warns once when dirty (also `Ctrl+X`, `q`, `quit`) |
+| `h`        | show the command and key reference (also `H`, `?`) |
 
 The `.` separator sits under the right hand on the numeric keypad, where there is
 no comma; a `,` works in its place anywhere — the two are interchangeable.
+
+A number can be offset from the end with `$-N`, so `$-9.$` is the last ten lines.
+`tail` is the everyday shorthand for that: bare `tail` brings the last screenful
+on screen ready to climb into, and `tail 10` shows the last ten lines. `head` is
+its mirror at the top. The offset is `ed`'s address arithmetic, restricted to the
+`$` anchor since nved has no roaming current line.
+
+You can also open straight to a range. A `+spec` argument — `spec` is any of the
+commands above — runs once on startup, so the block is already on screen at the
+prompt:
+
+```sh
+nved +42 notes.txt        # open with line 42 printed
+nved +10.30 notes.txt     # ... lines 10 through 30
+nved +tail notes.txt      # ... the last screenful, ready to edit
+```
 
 Out-of-range numbers clamp to the nearest valid line. A range taller than the
 terminal prints one screenful from the top; **Page-Up** and **Page-Down** reprint

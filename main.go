@@ -71,9 +71,18 @@ func main() {
 		}
 	}
 
-	var name string
-	if len(args) > 0 {
-		name = args[0]
+	// A "+SPEC" argument (vim/less style) opens straight to a range: SPEC is any
+	// prompt command — "+3.10", "+tail", "+$-20.$" — run once on startup so the
+	// block is sitting above the prompt, exactly as if it had been typed. The "+"
+	// marks it unambiguously, so it works in any position and never collides with
+	// a file named like an address.
+	var name, startSpec string
+	for _, a := range args {
+		if len(a) > 1 && a[0] == '+' {
+			startSpec = a[1:]
+		} else if name == "" {
+			name = a
+		}
 	}
 
 	b, newFile, err := openBuffer(name)
@@ -105,17 +114,28 @@ func main() {
 
 	w, h := termSize(fd)
 	r := &repl{b: b, rd: newReader(), termW: w, termH: h}
+	if startSpec != "" {
+		if r.dispatch(startSpec) {
+			return
+		}
+	}
 	r.run()
 }
 
 // printUsage writes the command-line help shown by --help / -h. The in-editor
 // command and key reference lives behind the `h` command at the prompt.
 func printUsage() {
-	fmt.Print(`Usage: nved [file]
+	fmt.Print(`Usage: nved [+spec] [file]
 
 A small REPL-flavored terminal text editor. Print a range of lines by number,
 climb into the printed block with Up / Left, and edit it in place. With no file
 it opens an empty unnamed buffer.
+
+A +spec argument opens straight to a range — it is any prompt command, run once
+on startup:
+  nved +42 notes.txt        open with line 42 printed
+  nved +10.30 notes.txt     ... lines 10 through 30
+  nved +tail notes.txt      ... the last screenful, ready to climb into
 
 Flags:
   -h, --help      Show this help
