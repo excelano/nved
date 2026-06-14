@@ -42,11 +42,28 @@ func (r *repl) dsvDispatch(s string) bool {
 		r.setRows('\x1e')
 	case strings.HasPrefix(s, "rows "):
 		emitf("nved: rows takes newline or record\n")
+	case s == "csv":
+		r.preset(',', true, true)
+	case s == "tsv":
+		r.preset('\t', true, true)
+	case s == "asv":
+		// The one cross-layer preset: record rows first (a buffer reload), then
+		// the field layer paints unit-delimited columns on top.
+		r.setRows('\x1e')
+		r.preset('\x1f', false, true)
 	default:
 		return false
 	}
 	r.last = nil
 	return true
+}
+
+// preset sets the whole field layer at once and reports the resulting mode.
+// csv/tsv/asv are nothing but presets over the dsv/quotes/headers primitives —
+// not a separate mode — so any one knob can be tuned afterward.
+func (r *repl) preset(delim rune, quotes, headers bool) {
+	r.delim, r.quotes, r.headers = delim, quotes, headers
+	emitf("%s\n", r.dsvState())
 }
 
 // setRows switches the record separator. When it actually changes, the buffer is

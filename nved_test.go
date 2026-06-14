@@ -815,6 +815,30 @@ func TestRowsCommand(t *testing.T) {
 	}
 }
 
+func TestPresets(t *testing.T) {
+	// Presets go through dispatch — the same path +spec runs on startup, so
+	// nved +csv f and nved +asv f open straight into the aligned view.
+	for _, c := range []struct {
+		cmd             string
+		delim           rune
+		quotes, headers bool
+		recSep          rune
+	}{
+		{"csv", ',', true, true, '\n'},
+		{"tsv", '\t', true, true, '\n'},
+		{"asv", '\x1f', false, true, '\x1e'},
+	} {
+		r := newRepl([]string{"a,b,c"}, 80, 24)
+		if r.dispatch(c.cmd) {
+			t.Fatalf("%s should not quit", c.cmd)
+		}
+		if r.delim != c.delim || r.quotes != c.quotes || r.headers != c.headers || r.b.sep() != c.recSep {
+			t.Errorf("%s -> delim=%q quotes=%v headers=%v sep=%q",
+				c.cmd, r.delim, r.quotes, r.headers, r.b.sep())
+		}
+	}
+}
+
 func TestExitAliases(t *testing.T) {
 	// Every alias quits a clean buffer at once.
 	for _, cmd := range []string{"x", "exit", "q", "quit"} {

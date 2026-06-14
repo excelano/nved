@@ -239,6 +239,15 @@ func printHelp() {
   s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
   x  exit     exit                      (Ctrl+X, also q, quit)
   h  help     show this help            (also H, ?)
+DSV view (opt-in; a file opens as plain text):
+  dsv C       show lines as columns split on C — a character, or tab / unit
+  dsv off     back to plain text (and climbable for editing)
+  quotes on|off    respect "quoted,fields" when splitting
+  headers on|off   pin line 1 as a faint column header
+  rows newline|record   record separator (record = ASCII 0x1E)
+  csv tsv asv      presets; asv = unit fields + record rows
+a bare dsv / quotes / headers / rows reports its current state.
+the aligned view is read-only — dsv off to climb in and edit.
 out-of-range numbers clamp to the nearest valid line.
 a , can be used in place of . in any range.
 climb into the last printed block with Up / Left / Ctrl+Home to edit it;
