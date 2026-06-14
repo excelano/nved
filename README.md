@@ -95,6 +95,48 @@ Long lines are word-wrapped by nved itself, with a continuation indent that line
 the wrapped text up under the gutter. Edits stay inside the printed block; to edit
 elsewhere, print that range and climb into it.
 
+## Viewing delimited files (CSV, TSV, DSV)
+
+A `.csv` is a text file, so nved opens it as plain text — nothing happens until
+you ask. Set a delimiter and the printed block renders as aligned columns:
+
+```
+> csv
+```
+
+`csv` is a preset; underneath it are independent switches you can set or tune on
+their own:
+
+| Command                | Effect                                                |
+|------------------------|-------------------------------------------------------|
+| `dsv C`                | split each line into columns on `C` — a character, or the name `tab` or `unit` |
+| `dsv off`              | back to plain text                                    |
+| `quotes on\|off`       | respect `"quoted,fields"` when splitting              |
+| `headers on\|off`      | draw line 1 as a faint column header, pinned when it scrolls off |
+| `rows newline\|record` | the record separator (`record` is the ASCII record separator, 0x1E) |
+| `csv` `tsv` `asv`      | presets — `csv` is `dsv ,` with quotes and headers on, `tsv` the same with tabs, `asv` the ASCII-separated set (`unit` fields, `record` rows) |
+
+Each switch invoked bare — `dsv`, `quotes`, `headers`, `rows` — reports its
+current state instead of changing it. Columns are sized to the widest cell on
+screen, and a row wider than the terminal is truncated at the right edge with a
+marker.
+
+The two ASCII information separators are worth knowing: `unit` (0x1F) for fields
+and `record` (0x1E) for rows never occur in ordinary text, so a file delimited by
+them needs no quoting or escaping at all — `asv` is the one-word way to read one.
+
+Because the view is reached through ordinary commands, `+spec` opens straight into
+it:
+
+```sh
+nved +csv data.csv
+nved +asv data.bin
+```
+
+The aligned view is read-only in this version: to edit, `dsv off` back to plain
+text, change the values, then set the delimiter again. Aligned editing — moving
+the cursor cell to cell — is the next step.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Authored by David Anderson, with AI assistance.
