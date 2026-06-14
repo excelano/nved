@@ -43,9 +43,46 @@ plain text — wrap off gives one row per line with the identical pan. The two v
 now share `oneRowPerLine`/`editor.windowed`, `emitWindowedRow`, and `curVisualCol`.
 Pending: dogfood, then tag v0.7.1.
 
-**Next slice (independent follow-on):**
-- **Slice 4 — structural editing** (`col add`/`col del`), PARKED out of v1. See
-  "Structural editing" below.
+**v1 roadmap — decided 2026-06-14 (post-dogfood).** Round-out is **C, locked**:
+edit the printed block, reprint to edit elsewhere; no roaming viewport. David:
+"C is still perfect." Build order, all independent, sequenced by size/headspace:
+
+1. **Slice 4 — structural columns** (`col add` / `col del`). UNPARKED — David was
+   reaching for it dogfooding wide CSVs. Confirm-on-delete already decided.
+   **Open crux (its own discussion, NOT small): columns have no on-screen
+   address.** Lines have gutter numbers; columns don't — so "which column" is
+   unresolved: count positionally (`col add 3`), name via the header (`col del
+   email`, needs headers on), or operate relative to the climbed-in cursor's
+   current field (but that restructures from inside the values-only cell editor,
+   which deliberately suppresses structural edits). Command-vs-chord
+   (`col add`/`col del` vs Ctrl+Insert/Ctrl+Delete) rides on this choice.
+
+2. **Search — `find <regex>`** (short **`f`**) — LOCKED 2026-06-14 as a word
+   command (rest of line = the pattern, like `head 10`). Prints the matching line
+   to climb into — fits C (dial in by content). Go `regexp` (RE2). Chosen OVER a
+   `/regex/` slash-address: word+letter matches nved's verb shape (save/s, exit/x,
+   find/f). **Find-next spelling deferred to post-compact** — bare `find`/`f` =
+   repeat-search is the obvious idiom but collides with the bare-reports-state
+   convention ([[feedback_bare_command_reports_state]]); unresolved.
+
+3. **Substitution — `replace /old/new/g`** (short **`r`**) — LOCKED 2026-06-14.
+   Verb is NOT `s` (taken by save; ed only gets away with `s` because its save is
+   `w`). **ed-style any-delimiter:** the first char after the verb is the delimiter
+   (`r ,old,new,`). **Space after the verb in the documented form, no-space also
+   accepted** (`r /…/` and `r/…/` both parse — skip optional ws after the verb,
+   next char = delim). **Guard: delimiter must be non-alphanumeric** — the sane
+   reading of "any delimiter" that kills the no-space word-form footgun (`replaced`
+   → `d`-delimited) and the `rows`/`r` ambiguity. **Scope: the printed block**, not
+   ed address-prefixed commands — dial in with `10.20`, then `replace /foo/bar/`
+   acts within it and reprints. RE2; one undo entry per run. **Help and docs use
+   `/` as the delimiter in examples** (David's call) even though any non-alnum
+   char works. `f`/`r` collide with
+   ed's `f`=filename / `r`=read (nved uses neither; spent-symbol note, accepted).
+
+Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
+still THEORETICAL (never hit in dogfooding); stays backlog as correctness
+insurance, do it when it bites or with hardening. **v1.0 hardening** (SECURITY.md,
+Dependabot, CodeQL) — later. Both detailed under "Later".
 
 (Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo — the stack lives on the
 buffer, so Ctrl+U works at the `>` prompt, survives climbing in and out, and
@@ -148,7 +185,9 @@ refuses). The prediction held: `wrap on|off` was really a TEXT-mode setting ridi
 the SAME hscroll machinery — built pan once, got both DSV wide-tables and text
 `wrap off`. Aligned (and wrap-off) rows never wrap, by the 1-row-per-line invariant.
 
-Structural editing (add/remove COLUMN) = PARKED, out of v1. Do it in raw mode for
+Structural editing (add/remove COLUMN) = UNPARKED 2026-06-14, queued for v1 as
+slice 4 (see the v1 roadmap up top; open crux = columns have no on-screen
+address). Raw-mode workaround until then. Do it in raw mode for
 now (`dsv off`, edit delimiters as text, re-set). If a real need appears: gated
 `col add`/`col del` commands and/or **Ctrl+Insert/Ctrl+Delete** (symmetrical,
 deliberate; preferred over Shift+Insert/Delete which = terminal paste/cut, and
@@ -165,10 +204,9 @@ widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
 
 ## Later
 
-- **Round-out decision** (leaning C): the "edit only the printed block, reprint
-  to edit elsewhere" boundary vs. whole-file editing. A roam-by-paging, B inline
-  managed viewport, C keep the boundary. David leans C ("dial in narrow parts by
-  line number, NOT scroll huge files") — decide after dogfooding.
+- **Round-out decision — DECIDED C (2026-06-14):** edit only the printed block,
+  reprint to edit elsewhere; NOT roam-by-paging (A) or a managed viewport (B).
+  Confirmed post-dogfood — David: "C is still perfect." No roaming viewport.
 - **Viewport slice** — bound editing to a screenful with a scrolling viewport
   (`e.top` offset) so a mid-edit split that grows the block past the screen
   doesn't desync the cursor / scroll the header off. Subsumes the hard part of
