@@ -258,38 +258,46 @@ func (r *repl) undoAtPrompt() {
 }
 
 func printHelp() {
-	emit(`nved commands
-  N           print line N (numbered)
-  N.M         print lines N..M
-  N.   .N     print N to the end / the start to N
-  .           print all lines
-  $   $-N     print the last line / the Nth line before it
-  head [N]    print the first screenful, or the first N lines
-  tail [N]    print the last screenful, or the last N lines
-  s [name]    write buffer to disk; name required when unnamed  (Ctrl+S)
-  x  exit     exit                      (Ctrl+X, also q, quit)
-  h  help     show this help            (also H, ?)
-  wrap on|off wrap long lines, or show one per row and pan sideways
-DSV view (opt-in; a file opens as plain text):
-  dsv C       show lines as columns split on C — a character, or tab / unit
-  dsv off     back to plain text
-  quotes on|off    respect "quoted,fields" when splitting
-  headers on|off   pin line 1 as a faint column header
-  rows newline|record   record separator (record = ASCII 0x1E)
-  csv tsv asv      presets; asv = unit fields + record rows (csv off etc. to undo)
-a bare dsv / quotes / headers / rows / wrap reports its current state.
-climb into an aligned block to edit cells in place: edits change the field
-value only — the delimiter key (allowed inside a "quoted" cell, where it is
-data), Enter-split and row joins are suppressed (dsv off for structural edits).
-out-of-range numbers clamp to the nearest valid line.
-a , can be used in place of . in any range.
-climb into the last printed block with Up / Left / Ctrl+Home to edit it;
-Ctrl+Left / Ctrl+Right skip back / forward by words — by field, with Tab /
-Shift-Tab, in an aligned view;
-Page-Up / Page-Down reprint the screenful above / below to climb into that;
-Ctrl+S (save in place) and Ctrl+X (exit) work while editing too;
-Ctrl+U undoes the last edit — at the prompt or while editing, and across
-climbing in and out (it reprints the edit if it scrolled off); leave the editor
-with Esc, Ctrl+C, or by stepping off the bottom (Down) or end (Right).
+	emit(`nved — print a range of lines, climb into it, and edit it in place.
+
+PRINTING
+  N            line N
+  N.M          lines N through M
+  N.   .N      line N to the end / the start to line N
+  .            every line
+  $    $-N     the last line / the Nth line before the last
+  head [N]     the first screenful, or the first N lines
+  tail [N]     the last screenful, or the last N lines
+  wrap on|off  word-wrap long lines, or one row each and pan sideways
+
+  Page-Up / Page-Down reprint the screenful above / below. A , works in
+  place of . in any range; out-of-range numbers clamp to the nearest line.
+
+EDITING — climb into the printed block to change it
+  climb in     Up (bottom line), Left (its end), or Ctrl+Home (first line)
+  move         arrows; Ctrl+Left / Ctrl+Right by word (by field when aligned)
+  jump         Home / End to line ends; Ctrl+Home / Ctrl+End to buffer ends
+  change       type to insert; Enter splits a line; Backspace / Delete join
+  undo         Ctrl+U — also at the prompt, and across climbing in and out
+  leave        Esc, Ctrl+C, or step off the bottom (Down) or the end (Right)
+
+SESSION
+  s [name]     save; a name is required when unnamed (also Ctrl+S)
+  x  q  quit   exit; warns once when there are unsaved edits (also Ctrl+X)
+  h  ?         show this help
+
+DELIMITED VIEW — opt-in; a file opens as plain text until you ask
+  dsv C                split lines into columns on C (a char, or tab / unit)
+  dsv off              back to plain text
+  quotes on|off        respect "quoted,fields" when splitting
+  headers on|off       pin line 1 as a faint column header
+  rows newline|record  the record separator (record = ASCII 0x1E)
+  csv  tsv  asv        presets; asv = unit fields, record rows (off undoes)
+
+  A bare dsv / quotes / headers / rows / wrap reports its current state.
+  In an aligned block, Tab / Shift-Tab move field to field and the grid
+  re-aligns as you type. Editing changes the field value only — the
+  delimiter (it is data inside a "quoted" cell), Enter-split, and row joins
+  are suppressed; use dsv off for structural edits.
 `)
 }
