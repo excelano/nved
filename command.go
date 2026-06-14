@@ -195,6 +195,23 @@ func (r *repl) printLines(start, end int) {
 	r.last = &block{start: start, count: end - start + 1}
 }
 
+// undoAtPrompt reverses the most recent edit from the command line — the path
+// for Ctrl+U pressed at the prompt, and for an in-editor Ctrl+U whose edit lies
+// off-screen (the editor leaves with actUndo and run() lands here). It applies
+// the inverse and reprints the affected line so the change is visible and ready
+// to climb into; with nothing to undo it says so and clears r.last.
+func (r *repl) undoAtPrompt() {
+	entry, ok := r.b.popUndo()
+	if !ok {
+		emit("nved: nothing to undo\n")
+		r.last = nil
+		return
+	}
+	entry.apply(r.b)
+	line := entry.line + 1 // printLines is 1-based
+	r.printLines(line, line)
+}
+
 func printHelp() {
 	emit(`nved commands
   N           print line N (numbered)
@@ -213,7 +230,8 @@ climb into the last printed block with Up / Left / Ctrl+Home to edit it;
 Ctrl+Left / Ctrl+Right skip the cursor back / forward by words while editing;
 Page-Up / Page-Down reprint the screenful above / below to climb into that;
 Ctrl+S (save in place) and Ctrl+X (exit) work while editing too;
-Ctrl+U undoes the last edit (within the session); leave the editor with Esc,
-Ctrl+C, or by stepping off the bottom (Down) or end (Right).
+Ctrl+U undoes the last edit — at the prompt or while editing, and across
+climbing in and out (it reprints the edit if it scrolled off); leave the editor
+with Esc, Ctrl+C, or by stepping off the bottom (Down) or end (Right).
 `)
 }

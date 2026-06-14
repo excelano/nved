@@ -87,7 +87,7 @@ The printed block sits just above the prompt. Climb into it to edit:
 - **Up** lands on the bottom line, **Left** at the end of the last line, **Ctrl+Home** on the first line.
 - Arrows move the cursor; **Ctrl+Left** / **Ctrl+Right** skip by words; **Home** / **End** and **Ctrl+Home** / **Ctrl+End** jump to the edges.
 - **Enter** splits a line, **Backspace** and **Delete** join lines, typing inserts.
-- **Ctrl+U** undoes the last edit within the session.
+- **Ctrl+U** undoes the last edit. The history lives with the buffer, so it works at the `>` prompt too and survives climbing in and out — if the undone edit has scrolled off, nved reprints it.
 - **Ctrl+S** saves in place without leaving (your cursor stays put); **Ctrl+X** exits — the save and exit chords work while editing, just as at the prompt.
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 

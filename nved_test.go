@@ -463,6 +463,53 @@ func TestUndoLIFO(t *testing.T) {
 	e.undo() // empty stack: no-op, must not panic
 }
 
+// The undo stack lives on the buffer, so an edit made while climbed in is still
+// undoable from the command prompt after the editing session is gone.
+func TestUndoAtPrompt(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"ac", "world"}, 80, 24)
+	e := &editor{r: r, start: 1, count: 2, cy: 0, cx: 1}
+	e.insert('b') // "abc"
+	if r.b.lines[0] != "abc" {
+		t.Fatalf("after insert: %q, want abc", r.b.lines[0])
+	}
+	// Session over; undo now comes from the prompt against the buffer's stack.
+	r.undoAtPrompt()
+	if r.b.lines[0] != "ac" {
+		t.Fatalf("after prompt undo: %q, want ac", r.b.lines[0])
+	}
+	if r.b.modified {
+		t.Error("undoing the only edit should restore modified=false")
+	}
+	if r.last == nil || r.last.start != 1 || r.last.count != 1 {
+		t.Fatalf("prompt undo should reprint the affected line, r.last=%+v", r.last)
+	}
+	r.undoAtPrompt() // empty stack: reports nothing to undo, must not panic
+}
+
+// An edit whose line lies outside the block currently climbed into is not undone
+// in place: undo returns actUndo (leaving the entry on the stack) so run() can
+// reprint it at the prompt.
+func TestUndoOutOfBlockLeaves(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a", "b", "c", "d", "e"}, 80, 24)
+	e1 := &editor{r: r, start: 1, count: 1, cy: 0, cx: 0}
+	e1.insert('X') // line 1 -> "Xa"
+	// Climb into a later block; the edit sits above it.
+	e2 := &editor{r: r, start: 4, count: 2, cy: 0, cx: 0}
+	if act := e2.undo(); act != actUndo {
+		t.Fatalf("out-of-block undo = %v, want actUndo", act)
+	}
+	if _, ok := r.b.peekUndo(); !ok {
+		t.Fatal("out-of-block undo must leave the entry on the stack")
+	}
+	if r.b.lines[0] != "Xa" {
+		t.Fatalf("out-of-block undo must not mutate the buffer yet: %q", r.b.lines[0])
+	}
+}
+
 func TestLineSurgery(t *testing.T) {
 	got := insertLine([]string{"a", "c"}, 1, "b")
 	if !reflect.DeepEqual(got, []string{"a", "b", "c"}) {

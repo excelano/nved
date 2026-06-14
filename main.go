@@ -55,6 +55,7 @@ const (
 	cmdClimb                   // climb into the last block, entering on climb
 	cmdPageUp                  // reprint the screenful above the block
 	cmdPageDown                // reprint the screenful below the block
+	cmdUndo                    // Ctrl+U at the prompt: undo the last edit
 	cmdQuit                    // Ctrl+C or end of input
 )
 
@@ -183,11 +184,15 @@ func (r *repl) run() {
 				if r.dispatch("x") {
 					return
 				}
+			case actUndo:
+				r.undoAtPrompt()
 			}
 		case cmdPageUp:
 			r.pageUp()
 		case cmdPageDown:
 			r.pageDown()
+		case cmdUndo:
+			r.undoAtPrompt()
 		case cmdSubmit:
 			if r.dispatch(res.line) {
 				return
@@ -200,7 +205,9 @@ func (r *repl) run() {
 // mode). Ctrl+S and Ctrl+X resolve to their command strings so the chord and
 // the typed word share one dispatch path. On an empty command line with a block
 // still below the prompt, a climb key (Up, Left, Ctrl+Home) returns a climb and
-// Page-Up/Page-Down return a page; every other navigation key is swallowed.
+// Page-Up/Page-Down return a page; every other navigation key is swallowed. On
+// an empty line Ctrl+U undoes the last edit, the same chord as in the editor;
+// with text typed it is swallowed so a half-written command is not lost.
 func (r *repl) readCommand() cmdResult {
 	var line []rune
 	for {
@@ -219,6 +226,11 @@ func (r *repl) readCommand() cmdResult {
 		case keyCtrlX:
 			out("\r\n")
 			return cmdResult{kind: cmdSubmit, line: "x"}
+		case keyCtrlU:
+			if len(line) == 0 {
+				out("\r\n")
+				return cmdResult{kind: cmdUndo}
+			}
 		case keyEnter:
 			out("\r\n")
 			return cmdResult{kind: cmdSubmit, line: string(line)}

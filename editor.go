@@ -71,21 +71,16 @@ type editor struct {
 	// flash is set while a save confirmation occupies the header row; the next
 	// key restores the normal header.
 	flash bool
-
-	// undos is the per-session undo stack: each entry reverses one edit,
-	// restoring the buffer, line count, cursor, and modified flag. Because
-	// undo is strict LIFO, an entry always runs against the exact buffer state
-	// it was recorded in, so the block rows it captured stay valid. Climbing
-	// out of the editor discards the stack — undo is within a session only.
-	undos []func(*editor)
 }
 
 // editAction is what an editing session asks run() to do once it closes. Most
 // keys keep editing and return nothing (actNone). Page-Up/Page-Down leave and
 // page from the command row; Ctrl+X leaves and exits; an unnamed Ctrl+S leaves to
 // be prompted for a file name. (A named Ctrl+S saves in place and does NOT leave,
-// so it has no action here.) Routing exit and the unnamed save back through run()
-// keeps one dispatch path shared with the command line.
+// so it has no action here.) Ctrl+U whose edit is off-screen leaves with actUndo
+// so run() can reprint it at the prompt. Routing exit, the unnamed save, and the
+// off-screen undo back through run() keeps one dispatch path shared with the
+// command line.
 type editAction int
 
 const (
@@ -94,6 +89,7 @@ const (
 	actPageDown
 	actSave
 	actExit
+	actUndo // the undone edit lies outside this block — leave and reprint it
 )
 
 // edit runs an editing session, entered by a climb key pressed at the command
@@ -214,7 +210,9 @@ func (e *editor) loop() editAction {
 		case keyDelete:
 			e.del()
 		case keyCtrlU:
-			e.undo()
+			if act := e.undo(); act != actNone {
+				return act
+			}
 		case keyTab:
 			e.insert('\t')
 		case keyRune:
@@ -372,13 +370,14 @@ func nextWordStart(rs []rune, i int) int {
 // --- editing ---------------------------------------------------------------
 //
 // Each mutator changes the buffer, marks it modified, updates the cursor,
-// records an inverse on the undo stack, and repaints. They are the single funnel
-// every edit flows through. Before mutating they capture the cursor's physical
-// row (prePhysRow), because after the edit the terminal cursor is still where it
-// was while (cy, cx) already point at the new spot — the repaint needs the old
-// physical row to climb back to the block. An inverse captures the pre-edit
-// cursor and modified flag plus enough to rebuild the text, so Ctrl+U lands
-// exactly where the edit began.
+// records an inverse on the buffer's undo stack, and repaints. They are the
+// single funnel every edit flows through. Before mutating they capture the
+// cursor's physical row (prePhysRow), because after the edit the terminal cursor
+// is still where it was while (cy, cx) already point at the new spot — the
+// repaint needs the old physical row to climb back to the block. The inverse
+// captures absolute buffer indices (idx is already one) plus the modified flag
+// and the line/column the edit began at, so Ctrl+U restores the text and lands
+// where the edit began whether the block is still on screen or not.
 
 // finishCharEdit redraws after an in-line character edit. If the line's wrapped
 // height is unchanged, only that line is rewritten in place; otherwise the lines
@@ -394,17 +393,19 @@ func (e *editor) finishCharEdit(prePhysRow, preH int) {
 // insert places a rune at the cursor and advances past it.
 func (e *editor) insert(r rune) {
 	idx := e.lineIdx()
-	preCy, preCx, preMod := e.cy, e.cx, e.r.b.modified
+	preCx, preMod := e.cx, e.r.b.modified
 	prePhysRow, _ := e.physCursor()
 	preH := e.physHeightOf(e.cy)
 	rs := []rune(e.r.b.lines[idx])
 	e.r.b.lines[idx] = string(spliceRune(rs, e.cx, r))
 	e.r.b.modified = true
 	e.cx++
-	e.record(func(e *editor) {
-		i := e.start - 1 + preCy
-		e.r.b.lines[i] = string(deleteRune([]rune(e.r.b.lines[i]), preCx))
-		e.cy, e.cx, e.r.b.modified = preCy, preCx, preMod
+	e.r.b.pushUndo(undoEntry{
+		apply: func(b *buffer) {
+			b.lines[idx] = string(deleteRune([]rune(b.lines[idx]), preCx))
+			b.modified = preMod
+		},
+		line: idx, col: preCx,
 	})
 	e.finishCharEdit(prePhysRow, preH)
 }
@@ -413,7 +414,7 @@ func (e *editor) insert(r rune) {
 // line below and landing the cursor at its start.
 func (e *editor) splitLine() {
 	idx := e.lineIdx()
-	preCy, preCx, preMod := e.cy, e.cx, e.r.b.modified
+	preCx, preMod := e.cx, e.r.b.modified
 	prePhysRow, _ := e.physCursor()
 	rs := []rune(e.curLine())
 	left, right := string(rs[:e.cx]), string(rs[e.cx:])
@@ -421,13 +422,14 @@ func (e *editor) splitLine() {
 	e.r.b.lines[idx] = left
 	e.r.b.modified = true
 	e.count++
-	e.cy, e.cx = preCy+1, 0
-	e.record(func(e *editor) {
-		i := e.start - 1 + preCy
-		e.r.b.lines[i] += e.r.b.lines[i+1]
-		e.r.b.lines = removeLine(e.r.b.lines, i+1)
-		e.count--
-		e.cy, e.cx, e.r.b.modified = preCy, preCx, preMod
+	e.cy, e.cx = e.cy+1, 0
+	e.r.b.pushUndo(undoEntry{
+		apply: func(b *buffer) {
+			b.lines[idx] += b.lines[idx+1]
+			b.lines = removeLine(b.lines, idx+1)
+			b.modified = preMod
+		},
+		line: idx, col: preCx, lineDelta: -1,
 	})
 	e.repaintAll(prePhysRow)
 }
@@ -438,7 +440,7 @@ func (e *editor) splitLine() {
 func (e *editor) backspace() {
 	idx := e.lineIdx()
 	if e.cx > 0 {
-		preCy, preCx, preMod := e.cy, e.cx, e.r.b.modified
+		preCx, preMod := e.cx, e.r.b.modified
 		prePhysRow, _ := e.physCursor()
 		preH := e.physHeightOf(e.cy)
 		rs := []rune(e.r.b.lines[idx])
@@ -446,10 +448,12 @@ func (e *editor) backspace() {
 		e.r.b.lines[idx] = string(deleteRune(rs, e.cx-1))
 		e.r.b.modified = true
 		e.cx--
-		e.record(func(e *editor) {
-			i := e.start - 1 + preCy
-			e.r.b.lines[i] = string(spliceRune([]rune(e.r.b.lines[i]), preCx-1, gone))
-			e.cy, e.cx, e.r.b.modified = preCy, preCx, preMod
+		e.r.b.pushUndo(undoEntry{
+			apply: func(b *buffer) {
+				b.lines[idx] = string(spliceRune([]rune(b.lines[idx]), preCx-1, gone))
+				b.modified = preMod
+			},
+			line: idx, col: preCx,
 		})
 		e.finishCharEdit(prePhysRow, preH)
 		return
@@ -457,21 +461,22 @@ func (e *editor) backspace() {
 	if e.cy == 0 {
 		return // can't join past the top of the block
 	}
-	preCy, preMod := e.cy, e.r.b.modified
+	preMod := e.r.b.modified
 	prePhysRow, _ := e.physCursor()
 	joinAt := e.lineLen(e.cy - 1)
 	e.r.b.lines[idx-1] += e.r.b.lines[idx]
 	e.r.b.lines = removeLine(e.r.b.lines, idx)
 	e.r.b.modified = true
 	e.count--
-	e.cy, e.cx = preCy-1, joinAt
-	e.record(func(e *editor) {
-		i := e.start - 1 + (preCy - 1)
-		rs := []rune(e.r.b.lines[i])
-		e.r.b.lines = insertLine(e.r.b.lines, i+1, string(rs[joinAt:]))
-		e.r.b.lines[i] = string(rs[:joinAt])
-		e.count++
-		e.cy, e.cx, e.r.b.modified = preCy, 0, preMod
+	e.cy, e.cx = e.cy-1, joinAt
+	e.r.b.pushUndo(undoEntry{
+		apply: func(b *buffer) {
+			rs := []rune(b.lines[idx-1])
+			b.lines = insertLine(b.lines, idx, string(rs[joinAt:]))
+			b.lines[idx-1] = string(rs[:joinAt])
+			b.modified = preMod
+		},
+		line: idx, col: 0, lineDelta: 1,
 	})
 	e.repaintAll(prePhysRow)
 }
@@ -482,16 +487,18 @@ func (e *editor) del() {
 	idx := e.lineIdx()
 	rs := []rune(e.curLine())
 	if e.cx < len(rs) {
-		preCy, preCx, preMod := e.cy, e.cx, e.r.b.modified
+		preCx, preMod := e.cx, e.r.b.modified
 		prePhysRow, _ := e.physCursor()
 		preH := e.physHeightOf(e.cy)
 		gone := rs[e.cx]
 		e.r.b.lines[idx] = string(deleteRune(rs, e.cx))
 		e.r.b.modified = true
-		e.record(func(e *editor) {
-			i := e.start - 1 + preCy
-			e.r.b.lines[i] = string(spliceRune([]rune(e.r.b.lines[i]), preCx, gone))
-			e.cy, e.cx, e.r.b.modified = preCy, preCx, preMod
+		e.r.b.pushUndo(undoEntry{
+			apply: func(b *buffer) {
+				b.lines[idx] = string(spliceRune([]rune(b.lines[idx]), preCx, gone))
+				b.modified = preMod
+			},
+			line: idx, col: preCx,
 		})
 		e.finishCharEdit(prePhysRow, preH)
 		return
@@ -499,41 +506,54 @@ func (e *editor) del() {
 	if e.cy == e.count-1 {
 		return // can't pull from below the block
 	}
-	preCy, preCx, preMod := e.cy, e.cx, e.r.b.modified // preCx == len(rs), the join point
+	preCx, preMod := e.cx, e.r.b.modified // preCx == len(rs), the join point
 	prePhysRow, _ := e.physCursor()
 	e.r.b.lines[idx] += e.r.b.lines[idx+1]
 	e.r.b.lines = removeLine(e.r.b.lines, idx+1)
 	e.r.b.modified = true
 	e.count--
-	e.record(func(e *editor) {
-		i := e.start - 1 + preCy
-		rs := []rune(e.r.b.lines[i])
-		e.r.b.lines = insertLine(e.r.b.lines, i+1, string(rs[preCx:]))
-		e.r.b.lines[i] = string(rs[:preCx])
-		e.count++
-		e.cy, e.cx, e.r.b.modified = preCy, preCx, preMod
+	e.r.b.pushUndo(undoEntry{
+		apply: func(b *buffer) {
+			rs := []rune(b.lines[idx])
+			b.lines = insertLine(b.lines, idx+1, string(rs[preCx:]))
+			b.lines[idx] = string(rs[:preCx])
+			b.modified = preMod
+		},
+		line: idx, col: preCx, lineDelta: 1,
 	})
 	e.repaintAll(prePhysRow)
 }
 
-// record pushes an inverse onto the undo stack.
-func (e *editor) record(inverse func(*editor)) {
-	e.undos = append(e.undos, inverse)
-}
-
-// undo pops the most recent inverse, applies it, and repaints the whole block.
-// With the stack empty it does nothing. The inverse restores the cursor, so the
-// repaint lands it where the undone edit began.
-func (e *editor) undo() {
-	n := len(e.undos)
-	if n == 0 {
-		return
+// undo reverses the most recent edit. With the stack empty it does nothing
+// (actNone). When the edit lies inside the block currently on screen — the
+// common case, undoing what you just typed — it applies the inverse, resizes the
+// block by the edit's line delta, restores the cursor, and repaints in place. A
+// join-undo re-creates a line just past the block's bottom, so the in-block test
+// allows for that growth. When the edit lies elsewhere (the stack outlived the
+// block it was made in) it returns actUndo without popping, leaving the editor so
+// run() can reprint the edit at the prompt — undo always reverses the last edit,
+// wherever it was.
+func (e *editor) undo() editAction {
+	entry, ok := e.r.b.peekUndo()
+	if !ok {
+		return actNone
 	}
-	inverse := e.undos[n-1]
-	e.undos = e.undos[:n-1]
+	lo := e.start - 1
+	hi := e.start - 1 + e.count - 1
+	if entry.lineDelta > 0 {
+		hi += entry.lineDelta
+	}
+	if entry.line < lo || entry.line > hi {
+		return actUndo
+	}
+	e.r.b.popUndo()
 	prePhysRow, _ := e.physCursor()
-	inverse(e)
+	entry.apply(e.r.b)
+	e.count += entry.lineDelta
+	e.cy = entry.line - (e.start - 1)
+	e.cx = entry.col
 	e.repaintAll(prePhysRow)
+	return actNone
 }
 
 // save writes the buffer to disk without leaving the editor — Ctrl+S checkpoints

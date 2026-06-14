@@ -12,7 +12,8 @@ type buffer struct {
 	lines     []string
 	name      string // file name, "" when unnamed
 	modified  bool
-	exitArmed bool // set after the first x on a dirty buffer (warn-twice)
+	exitArmed bool        // set after the first x on a dirty buffer (warn-twice)
+	undos     []undoEntry // edit history, newest last; see undo.go
 }
 
 // openBuffer loads name into a buffer. The bool return is true for the

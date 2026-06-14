@@ -9,16 +9,14 @@ the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
 ## Next
 
-### Persistent (buffer-level) Ctrl+U undo
+The next feature is **native CSV / TSV / DSV handling** (below), but it needs a
+design spec before any code — see that section. Nothing else is committed-next.
 
-Today undo is per-session: the stack lives on the `editor` struct and is
-discarded when you climb out of a block, so Ctrl+U does nothing at the `>`
-prompt. Make undo work after climbing out / at the prompt. The shape: relocate
-the undo stack off the session onto the buffer (or repl); rewrite the 4 inverse
-closures (`insert`/`splitLine`/`backspace`/`del`) to capture ABSOLUTE buffer
-positions rather than session-relative `cy`/`cx` (which are offsets from
-`e.start`); add a no-cursor apply path that reprints the affected line, since
-there's no cursor at the prompt. This is the agreed next change.
+(Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo. The undo stack now
+lives on the buffer instead of the editing session, so Ctrl+U works at the `>`
+prompt and survives climbing in and out; an undo of an edit that has scrolled
+off-screen reprints it. The four inverse closures capture absolute buffer
+indices instead of session-relative `cy`/`cx`.)
 
 ---
 
