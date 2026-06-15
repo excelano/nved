@@ -302,7 +302,7 @@ SEARCH — find by content, then climb in and edit it (regexes, RE2)
   replace all  swap every match in one undoable pass; replace all /old/new/
 
   Ctrl+F / Ctrl+R seed the line with find / replace. After a hit the prompt
-  arms "<verb> next" — Enter steps (rn = replace next), Esc clears, and a
+  arms the next step — Enter repeats it (fn / rn short), Esc clears, and a
   climb key edits the highlighted match. The delimiter is any non-letter, so
   replace ,old,new, sidesteps escaping a slash.
 

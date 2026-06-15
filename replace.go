@@ -39,7 +39,16 @@ func (r *repl) replaceDispatch(s string) bool {
 	}
 	switch strings.TrimSpace(rest) {
 	case "":
-		r.reportReplace()
+		// Bare replace is the first armed step: "replace this highlighted candidate".
+		// Preview-first means the first match is shown UNCHANGED, so the first prompt
+		// reads `replace` (not `replace next`) and Enter applies it. A narrow
+		// exception to bare-reports-state — it only acts while a replace is armed;
+		// with nothing armed it still reports.
+		if r.search != nil && r.search.isRepl {
+			r.replaceNext()
+		} else {
+			r.reportReplace()
+		}
 	case "next":
 		r.replaceNext()
 	default:
@@ -163,7 +172,7 @@ func (r *repl) startReplaceSpec(spec string, global bool) {
 	}
 	r.search = &searchState{re: re, pat: old, line: line, lo: lo, hi: hi, isRepl: true, repl: repl}
 	r.showMatch()
-	r.pendingLine = "replace next"
+	r.pendingLine = "replace" // first candidate not yet replaced: "replace this", not "...next"
 }
 
 // replaceNext applies the highlighted OLD match — the pending candidate — then

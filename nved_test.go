@@ -1578,16 +1578,21 @@ func TestReplaceStepping(t *testing.T) {
 	if r.search == nil || !r.search.isRepl || r.search.line != 0 {
 		t.Fatalf("replace should arm on the first match, got %+v", r.search)
 	}
-	if r.pendingLine != "replace next" {
-		t.Errorf("replace should arm pendingLine, got %q", r.pendingLine)
+	// First candidate is unreplaced, so the first prompt reads bare "replace".
+	if r.pendingLine != "replace" {
+		t.Errorf("first arm should be bare replace, got %q", r.pendingLine)
 	}
-	// Step: replaces the highlighted foo, advances to the next.
-	r.replaceDispatch("replace next")
+	// Bare replace, while armed, applies the highlighted candidate and advances,
+	// then re-arms to "replace next" for the subsequent steps.
+	r.replaceDispatch("replace")
 	if r.b.lines[0] != "X here" {
 		t.Fatalf("first step -> %q, want %q", r.b.lines[0], "X here")
 	}
 	if r.search == nil || r.search.line != 1 {
 		t.Fatalf("step should advance to line 1, got %+v", r.search)
+	}
+	if r.pendingLine != "replace next" {
+		t.Errorf("after the first step, arm should be replace next, got %q", r.pendingLine)
 	}
 	r.replaceDispatch("rn") // short form
 	r.replaceDispatch("rn")
