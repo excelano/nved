@@ -69,6 +69,9 @@ func (r *repl) dispatch(line string) bool {
 	if r.replaceDispatch(s) {
 		return false
 	}
+	if r.columnsDispatch(s) {
+		return false
+	}
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
 		r.printLines(start, end)
 	} else {
@@ -210,14 +213,26 @@ func doExit(b *buffer) bool {
 // leads the block — which lines show, of how many, plus the paging keys when
 // there's somewhere to page. r.termW/termH are refreshed here so the block
 // reflects the current terminal size, which the editor reuses on a later climb.
-func (r *repl) printLines(start, end int) {
+func (r *repl) printLines(start, end int) { r.printRange(start, end, false) }
+
+// printColumns is printLines with the faint index ruler turned on — the view the
+// columns command and a column edit leave on screen, so the 1-based column numbers
+// sit above the grid, ready to address with insert / kill.
+func (r *repl) printColumns(start, end int) { r.printRange(start, end, true) }
+
+// printRange is the shared block print behind printLines and printColumns: refresh
+// the size, cap the range to one screenful, and render aligned (a delimiter is set
+// and every line parses) or raw, recording the block as r.last so a later climb
+// lands on it. ruler asks the aligned path for the column index ruler; the raw
+// path ignores it, having no columns.
+func (r *repl) printRange(start, end int, ruler bool) {
 	r.refreshSize()
 	if fit := r.fillDown(start); end > fit {
 		end = fit
 	}
 	out(csiWrapOff)
 	if r.delim != 0 {
-		r.lastAligned = r.printBlockAligned(start, end) // false when it falls back to raw
+		r.lastAligned = r.printBlockAligned(start, end, ruler) // false when it falls back to raw
 	} else {
 		r.printBlockRaw(start, end)
 		r.lastAligned = false
@@ -318,6 +333,10 @@ DELIMITED VIEW — opt-in; a file opens as plain text until you ask
   headers on|off       pin line 1 as a faint column header
   rows newline|record  the record separator (record = ASCII 0x1E)
   csv  tsv  asv        presets; asv = unit fields, record rows (off undoes)
+  columns      c       show the faint column-index ruler above the grid
+  columns insert [N]   add an empty column right of N — ci [N]; bare appends,
+                       0 prepends
+  columns kill N       delete column N from every row, after a confirm — ck N
 
   A bare dsv / quotes / headers / rows / wrap reports its current state.
   In an aligned block, Tab / Shift-Tab move field to field and the grid

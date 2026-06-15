@@ -52,20 +52,24 @@ independent but still has an open addressing crux, so it follows once that desig
 pass is done. Slices below are numbered by the original plan; build sequence is
 2 → 3 → 1.
 
-**STATUS 2026-06-14: find (2) and replace (3) SHIPPED as one bundle — v0.8.0**
-(David's call: one tag, not separate v0.8.0/v0.9.0). Columns (1) is the last v1
-slice → v0.9.0; its addressing crux still needs a design pass before code. v1.0.0
-stays the hardening milestone.
+**STATUS 2026-06-14: find (2) and replace (3) SHIPPED as one bundle — v0.8.0.
+Columns (1) SHIPPED — v0.9.0** (command-only, see below). **NEXT: structural ROWS
+→ v0.10.0** (unparked from this design pass — see "Rows" below). v1.0.0 stays the
+hardening milestone.
 
-1. **Slice 4 — structural columns** (`col add` / `col del`). UNPARKED — David was
-   reaching for it dogfooding wide CSVs. Confirm-on-delete already decided.
-   **Open crux (its own discussion, NOT small): columns have no on-screen
-   address.** Lines have gutter numbers; columns don't — so "which column" is
-   unresolved: count positionally (`col add 3`), name via the header (`col del
-   email`, needs headers on), or operate relative to the climbed-in cursor's
-   current field (but that restructures from inside the values-only cell editor,
-   which deliberately suppresses structural edits). Command-vs-chord
-   (`col add`/`col del` vs Ctrl+Insert/Ctrl+Delete) rides on this choice.
+1. **Slice 4 — structural columns** (`columns insert` / `columns kill`) —
+   **SHIPPED v0.9.0 2026-06-14.** Addressing crux RESOLVED: **command-only, no
+   chords** (every mnemonic key was taken — Insert is eaten as Copy by VTE, Ctrl+I
+   *is* Tab and would shadow field-nav, Delete/Insert aren't on every keyboard).
+   Columns have no gutter address, so they are named by **1-based position**,
+   surfaced on demand by a faint **top index ruler** (above the header, traces
+   straight down; `columns` / `c` prints it). `columns insert [N]` / `ci [N]` —
+   empty column right of N (bare appends, 0 prepends); `columns kill N` / `ck N` —
+   delete with confirm (names the column when headers on); bare `kill`/`ck` errors
+   (destructive, must name a target). Each op is all-or-nothing across the buffer
+   (a line that won't parse aborts it untouched) with ONE undo entry, and rejoins
+   raw cells verbatim so quoted fields round-trip. Files: columns.go +
+   printRange/printColumns (command.go) + emitRuler/columnRuler (dsv.go).
 
 2. **Search — `find <regex>`** (short **`f`**) — BUILT 2026-06-14 as a word
    command (rest of line = the pattern, like `head 10`). Go `regexp` (RE2). Chosen
@@ -126,6 +130,27 @@ stays the hardening milestone.
    - **Scope: buffer-wide** for both stepping and `all` (see item 3 — the earlier
      block-scope line was dropped as inconsistent; additive range-scope possible
      later).
+
+**Rows — structural row editing → v0.10.0 (NEXT, unparked 2026-06-14).** Columns
+exposed a real gap: structural row edits are awkward. Two holes — (a) aligned DSV
+view suppresses Enter-split / row-join (a mid-field split corrupts columns), so a
+record can't be added/removed without `dsv off`; (b) no address-range line delete
+anywhere. A `rows insert`/`rows kill` command fills both, and is the *right*
+primitive for aligned mode (adds a well-formed empty record, not an unsafe
+mid-field split). NOT mere symmetry with columns — rows are the primary axis and
+already carry gutter addresses, so **no ruler needed**. Plan:
+  - `rows insert [N]` / `ri [N]` — blank record after line N (bare appends, 0
+    prepends). Empty-record SHAPE: match the column count (`,,` for a 3-col file)
+    so it aligns, not a bare one-cell line. (David to confirm.)
+  - `rows kill N` (or `N.M`) / `rk` — delete a line or range. Confirm only for
+    RANGES / multiple, NOT a single line (less destructive than a column kill,
+    which hits every row).
+  - **Rename the record-separator command `rows newline|record` →
+    `linebreaks newline|record`** (David's call; `recsep` rejected as wonky, plain
+    complete words preferred). Frees `rows` for structural editing. Breaking change,
+    no alias — nved is 0.x, ~one user, and `rows`-means-separator was always odd.
+  - Open wrinkle: `ri`/`rk` sit beside replace's `r`/`rn`/`ra` (all under "r");
+    mechanically free (no collision), watch for confusion.
 
 Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
 still THEORETICAL (never hit in dogfooding); stays backlog as correctness

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -455,7 +456,7 @@ func alignedVisualCol(spans []fieldSpan, colW []int, gapW, cx int) int {
 // with a faint ›. If any line won't parse (a multi-line quoted field), it bails to
 // a raw view with a notice — it never paints a grid it can't stand behind, and
 // returns false so the caller marks the block un-alignable (not climbable).
-func (r *repl) printBlockAligned(start, end int) bool {
+func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
 	w := r.gutterW()
 	avail := r.termW - (w + 2)
 	if avail < 1 {
@@ -492,6 +493,11 @@ func (r *repl) printBlockAligned(start, end int) bool {
 	colW := colWidths(wRows)
 
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
+	if ruler {
+		// The column index ruler sits at the very top, above the header, so each
+		// number heads its column and a wide table traces straight down.
+		r.emitRuler(w, avail, colW)
+	}
 	if showSticky {
 		// The pinned header is a reference copy of line 1, not the live match
 		// location, so it carries no highlight.
@@ -517,6 +523,43 @@ func (r *repl) printBlockAligned(start, end int) bool {
 		emitWindowedRow(w, num, 0, avail, text, sep, dim, hlLo, hlHi)
 	}
 	return true
+}
+
+// emitRuler prints the faint column-index ruler: a blank gutter (so it column-
+// aligns with the data body) followed by a 1-based number at the left edge of each
+// column. It is windowed to the visible width like the data rows — at hscroll 0,
+// the command-line print never pans — with a faint › where the grid runs past the
+// edge. The whole row is drawn faint, the same dim brightness cue as the gutter.
+func (r *repl) emitRuler(w, avail int, colW []int) {
+	rs := []rune(columnRuler(colW, gapWidth(r.delim)))
+	_, lo, hi, right := window(len(rs), 0, avail)
+	row := contPrefix(w) + string(rs[lo:hi])
+	if right {
+		row += "›"
+	}
+	out("\r" + csiEL + faint(row) + "\r\n")
+}
+
+// columnRuler builds the index ruler body: each column's 1-based number, left-
+// aligned at the column's start, padded to the same column widths and inter-column
+// gaps alignRow uses so every number heads its column. A number wider than its
+// column (a two-digit index over a one-wide column) overruns into the gap, which
+// the gap's two-or-three columns absorb without colliding for ordinary tables.
+func columnRuler(colW []int, gapW int) string {
+	var b strings.Builder
+	for f := range colW {
+		if f > 0 {
+			b.WriteString(strings.Repeat(" ", gapW))
+		}
+		label := strconv.Itoa(f + 1)
+		b.WriteString(label)
+		if f < len(colW)-1 {
+			if pad := colW[f] - len(label); pad > 0 {
+				b.WriteString(strings.Repeat(" ", pad))
+			}
+		}
+	}
+	return b.String()
 }
 
 // emitWindowedRow prints one gutter-prefixed row windowed to the visible columns

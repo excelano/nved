@@ -1642,3 +1642,207 @@ func TestReplaceDispatchFallThrough(t *testing.T) {
 		}
 	}
 }
+
+// --- columns ---------------------------------------------------------------
+
+func TestInsertColumnCells(t *testing.T) {
+	base := []string{"a", "b", "c"}
+	cases := []struct {
+		p    int
+		want []string
+	}{
+		{0, []string{"", "a", "b", "c"}}, // prepend
+		{1, []string{"a", "", "b", "c"}}, // right of column 1
+		{3, []string{"a", "b", "c", ""}}, // at the end
+		{9, []string{"a", "b", "c", ""}}, // past the end clamps to append
+		{-1, []string{"", "a", "b", "c"}},
+	}
+	for _, c := range cases {
+		if got := insertColumnCells(base, c.p); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("insertColumnCells(%v, %d) = %v, want %v", base, c.p, got, c.want)
+		}
+	}
+	if !reflect.DeepEqual(base, []string{"a", "b", "c"}) {
+		t.Errorf("insertColumnCells mutated its input: %v", base)
+	}
+}
+
+func TestDeleteColumnCells(t *testing.T) {
+	base := []string{"a", "b", "c"}
+	if got, ok := deleteColumnCells(base, 1); !ok || !reflect.DeepEqual(got, []string{"a", "c"}) {
+		t.Errorf("deleteColumnCells(%v, 1) = %v, %v", base, got, ok)
+	}
+	if got, ok := deleteColumnCells(base, 5); ok || !reflect.DeepEqual(got, base) {
+		t.Errorf("out-of-range delete should be a no-op, got %v, %v", got, ok)
+	}
+	if !reflect.DeepEqual(base, []string{"a", "b", "c"}) {
+		t.Errorf("deleteColumnCells mutated its input: %v", base)
+	}
+}
+
+func newColRepl(t *testing.T, lines []string) *repl {
+	t.Helper()
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl(lines, 80, 24)
+	r.delim, r.quotes, r.headers = ',', true, true
+	return r
+}
+
+func TestColumnsInsert(t *testing.T) {
+	r := newColRepl(t, []string{"name,age", "alice,30", "bob,7"})
+	if !r.columnsDispatch("ci 1") { // right of column 1
+		t.Fatal("ci 1 should be a column command")
+	}
+	want := []string{"name,,age", "alice,,30", "bob,,7"}
+	if !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("ci 1 -> %q, want %q", r.b.lines, want)
+	}
+	if !r.b.modified {
+		t.Error("a column insert should mark the buffer modified")
+	}
+	// Undo reverts the whole op in one step.
+	r.undoAtPrompt()
+	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30", "bob,7"}) {
+		t.Errorf("undo of ci -> %q", r.b.lines)
+	}
+}
+
+func TestColumnsInsertAppendAndPrepend(t *testing.T) {
+	r := newColRepl(t, []string{"a,b", "c,d"})
+	r.columnsDispatch("ci") // bare: append at the far right
+	if !reflect.DeepEqual(r.b.lines, []string{"a,b,", "c,d,"}) {
+		t.Fatalf("bare ci -> %q", r.b.lines)
+	}
+	r.columnsDispatch("columns insert 0") // long form, prepend
+	if !reflect.DeepEqual(r.b.lines, []string{",a,b,", ",c,d,"}) {
+		t.Fatalf("insert 0 -> %q", r.b.lines)
+	}
+}
+
+func TestColumnsKillConfirmed(t *testing.T) {
+	r := newColRepl(t, []string{"name,age,city", "alice,30,rome", "bob,7,pisa"})
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("y\r")
+	pw.Close()
+	r.rd = &reader{in: pr}
+	if !r.columnsDispatch("ck 2") {
+		t.Fatal("ck 2 should be a column command")
+	}
+	want := []string{"name,city", "alice,rome", "bob,pisa"}
+	if !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("ck 2 (confirmed) -> %q, want %q", r.b.lines, want)
+	}
+}
+
+func TestColumnsKillCancelled(t *testing.T) {
+	r := newColRepl(t, []string{"name,age", "alice,30"})
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("n\r")
+	pw.Close()
+	r.rd = &reader{in: pr}
+	r.columnsDispatch("ck 2")
+	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30"}) {
+		t.Errorf("a cancelled kill must change nothing, got %q", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("a cancelled kill must not mark the buffer modified")
+	}
+}
+
+func TestColumnsKillBareErrors(t *testing.T) {
+	r := newColRepl(t, []string{"a,b", "c,d"})
+	r.columnsDispatch("ck") // no column number — destructive, must refuse
+	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
+		t.Errorf("bare ck must change nothing, got %q", r.b.lines)
+	}
+	r.columnsDispatch("ck 9") // out of range
+	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
+		t.Errorf("out-of-range ck must change nothing, got %q", r.b.lines)
+	}
+}
+
+func TestColumnsQuotedRoundTrip(t *testing.T) {
+	// A quoted field with an embedded delimiter must survive a column insert
+	// verbatim — the raw-cell join keeps its quotes and inner comma intact.
+	r := newColRepl(t, []string{`a,"b,c",d`})
+	r.columnsDispatch("ci 2") // right of the quoted field
+	if r.b.lines[0] != `a,"b,c",,d` {
+		t.Fatalf("quoted round-trip -> %q, want %q", r.b.lines[0], `a,"b,c",,d`)
+	}
+}
+
+func TestColumnsUnbalancedAborts(t *testing.T) {
+	// With quotes on, a line that won't parse must abort the whole op untouched.
+	r := newColRepl(t, []string{"a,b", `c,"unterminated`})
+	before := append([]string(nil), r.b.lines...)
+	r.columnsDispatch("ci 1")
+	if !reflect.DeepEqual(r.b.lines, before) {
+		t.Errorf("an unbalanced-quote line must abort the op, got %q", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("an aborted column op must not mark the buffer modified")
+	}
+}
+
+func TestColumnsDsvOnly(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a,b", "c,d"}, 80, 24) // no delimiter set
+	r.columnsDispatch("ci 1")
+	if r.b.modified || !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
+		t.Errorf("columns outside dsv must be a no-op, got %q modified=%v", r.b.lines, r.b.modified)
+	}
+}
+
+func TestColumnRuler(t *testing.T) {
+	// Numbers sit at each column's left edge, padded to the column width plus the
+	// gap so they head their columns. Widths [4,3,5], printable-delim gap 3.
+	got := columnRuler([]int{4, 3, 5}, 3)
+	want := "1      2     3" // "1"+3pad +3gap +"2"+2pad +3gap +"3"
+	if got != want {
+		t.Errorf("columnRuler = %q, want %q", got, want)
+	}
+}
+
+func TestColumnsDispatchFallThrough(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"hello"}, 80, 24)
+	for _, s := range []string{"csv", "clear", "category", "5.10", "5"} {
+		if r.columnsDispatch(s) {
+			t.Errorf("%q should not match columnsDispatch", s)
+		}
+	}
+}
+
+// TestPrintColumnsRendersRuler captures the full columns view and checks the
+// faint index ruler leads the grid, above the header, with a number per column.
+func TestPrintColumnsRendersRuler(t *testing.T) {
+	var buf strings.Builder
+	old := screen
+	screen = &buf
+	t.Cleanup(func() { screen = old })
+	r := newRepl([]string{"name,age", "Ada,36", "Linus,54"}, 80, 24)
+	r.delim, r.quotes, r.headers = ',', true, true
+	r.printColumns(1, 3)
+	clean := regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`).ReplaceAllString(buf.String(), "")
+	rows := strings.Split(strings.ReplaceAll(clean, "\r", ""), "\n")
+	// Find the ruler row (the one whose trimmed content starts "1") and the header.
+	rulerAt, headerAt := -1, -1
+	for i, ln := range rows {
+		tr := strings.TrimSpace(ln)
+		if rulerAt < 0 && strings.HasPrefix(tr, "1 ") && strings.Contains(tr, "2") {
+			rulerAt = i
+		}
+		if strings.Contains(ln, "name") && strings.Contains(ln, "age") {
+			headerAt = i
+		}
+	}
+	if rulerAt < 0 {
+		t.Fatalf("no index ruler found in:\n%s", clean)
+	}
+	if headerAt < 0 || rulerAt >= headerAt {
+		t.Errorf("ruler (row %d) must sit above the header (row %d)", rulerAt, headerAt)
+	}
+}
