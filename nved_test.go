@@ -1498,3 +1498,142 @@ func TestFindHighlightsMatch(t *testing.T) {
 		t.Errorf("aligned match should be highlighted, got %q", got)
 	}
 }
+
+func TestParseReplaceSpec(t *testing.T) {
+	cases := []struct {
+		spec          string
+		old, repl     string
+		wantErr       bool
+	}{
+		{"/old/new/", "old", "new", false},
+		{"/old/new", "old", "new", false},   // trailing delimiter optional
+		{" /old/new/", "old", "new", false}, // leading space (verb-space form)
+		{",a,b,", "a", "b", false},          // any non-alnum delimiter
+		{"#a#b#", "a", "b", false},
+		{"/foo/", "foo", "", false},         // replace with empty = delete
+		{"/a/b/c/", "", "", true},           // text past closing delimiter
+		{"xoldxnewx", "", "", true},         // alphanumeric delimiter rejected
+		{"3a3b3", "", "", true},             // digit delimiter rejected
+		{"", "", "", true},                  // empty
+		{"/only", "", "", true},             // no closing delimiter
+		{"//new/", "", "", true},            // empty old pattern
+	}
+	for _, c := range cases {
+		old, repl, err := parseReplaceSpec(c.spec)
+		if (err != nil) != c.wantErr {
+			t.Errorf("parseReplaceSpec(%q) err=%v, wantErr=%v", c.spec, err, c.wantErr)
+			continue
+		}
+		if !c.wantErr && (old != c.old || repl != c.repl) {
+			t.Errorf("parseReplaceSpec(%q) = (%q,%q), want (%q,%q)", c.spec, old, repl, c.old, c.repl)
+		}
+	}
+}
+
+func TestReplaceVerbMatching(t *testing.T) {
+	// matchVerb: bare, space form, no-space delimiter form; alnum after verb rejects.
+	for _, c := range []struct {
+		s, verb, rest string
+		ok            bool
+	}{
+		{"r", "r", "", true},
+		{"r /a/b/", "r", " /a/b/", true},
+		{"r/a/b/", "r", "/a/b/", true},
+		{"rows", "r", "", false},      // alnum after r
+		{"rn", "r", "", false},        // short form not a bare-r match
+		{"ra/a/b/", "ra", "/a/b/", true},
+		{"replace", "replace", "", true},
+	} {
+		rest, ok := matchVerb(c.s, c.verb)
+		if ok != c.ok || (ok && rest != c.rest) {
+			t.Errorf("matchVerb(%q,%q) = (%q,%v), want (%q,%v)", c.s, c.verb, rest, ok, c.rest, c.ok)
+		}
+	}
+	// cutAllKeyword spots the global keyword only as a leading bareword.
+	for _, c := range []struct {
+		rest, spec string
+		ok         bool
+	}{
+		{" all /a/b/", " /a/b/", true},
+		{"all/a/b/", "/a/b/", true},
+		{"/all/x/", "", false}, // old pattern is "all", not the keyword
+	} {
+		spec, ok := cutAllKeyword(c.rest)
+		if ok != c.ok || (ok && spec != c.spec) {
+			t.Errorf("cutAllKeyword(%q) = (%q,%v), want (%q,%v)", c.rest, spec, ok, c.spec, c.ok)
+		}
+	}
+}
+
+func TestReplaceStepping(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"foo here", "and foo and foo", "bar"}, 80, 24)
+
+	// Preview-first: the spec arms but changes nothing yet.
+	r.replaceDispatch("replace /foo/X/")
+	if r.b.lines[0] != "foo here" {
+		t.Fatalf("preview should not change the buffer, got %q", r.b.lines[0])
+	}
+	if r.search == nil || !r.search.isRepl || r.search.line != 0 {
+		t.Fatalf("replace should arm on the first match, got %+v", r.search)
+	}
+	if r.pendingLine != "replace next" {
+		t.Errorf("replace should arm pendingLine, got %q", r.pendingLine)
+	}
+	// Step: replaces the highlighted foo, advances to the next.
+	r.replaceDispatch("replace next")
+	if r.b.lines[0] != "X here" {
+		t.Fatalf("first step -> %q, want %q", r.b.lines[0], "X here")
+	}
+	if r.search == nil || r.search.line != 1 {
+		t.Fatalf("step should advance to line 1, got %+v", r.search)
+	}
+	r.replaceDispatch("rn") // short form
+	r.replaceDispatch("rn")
+	if r.b.lines[1] != "and X and X" {
+		t.Fatalf("after stepping line 1 -> %q, want %q", r.b.lines[1], "and X and X")
+	}
+	// All three replaced; the next step finds nothing and disarms.
+	if r.search != nil {
+		t.Errorf("after exhausting matches, search should disarm, got %+v", r.search)
+	}
+
+	// Undo peels the replacements back one at a time (LIFO).
+	r.undoAtPrompt()
+	if r.b.lines[1] != "and X and foo" {
+		t.Errorf("one undo -> %q, want %q", r.b.lines[1], "and X and foo")
+	}
+}
+
+func TestReplaceAll(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"foo a foo", "b", "foo c"}, 80, 24)
+	r.replaceDispatch("replace all /foo/Z/")
+	if r.b.lines[0] != "Z a Z" || r.b.lines[2] != "Z c" {
+		t.Fatalf("replace all -> %q / %q", r.b.lines[0], r.b.lines[2])
+	}
+	// One undo entry reverts the whole run.
+	r.undoAtPrompt()
+	if r.b.lines[0] != "foo a foo" || r.b.lines[2] != "foo c" {
+		t.Errorf("undo of replace all -> %q / %q", r.b.lines[0], r.b.lines[2])
+	}
+
+	// ra short form, with a capture-group reference in the replacement.
+	r.replaceDispatch(`ra /(foo) (a)/$2-$1/`)
+	if r.b.lines[0] != "a-foo foo" {
+		t.Errorf("ra with backref -> %q, want %q", r.b.lines[0], "a-foo foo")
+	}
+}
+
+func TestReplaceDispatchFallThrough(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"hello"}, 80, 24)
+	for _, s := range []string{"rationale", "5.10", "rows", "5"} {
+		if r.replaceDispatch(s) {
+			t.Errorf("%q should not match replaceDispatch", s)
+		}
+	}
+}

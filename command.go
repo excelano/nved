@@ -66,6 +66,9 @@ func (r *repl) dispatch(line string) bool {
 	if r.findDispatch(s) {
 		return false
 	}
+	if r.replaceDispatch(s) {
+		return false
+	}
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
 		r.printLines(start, end)
 	} else {
@@ -292,6 +295,16 @@ EDITING — climb into the printed block to change it
   change       type to insert; Enter splits a line; Backspace / Delete join
   undo         Ctrl+U — also at the prompt, and across climbing in and out
   leave        Esc, Ctrl+C, or step off the bottom (Down) or the end (Right)
+
+SEARCH — find by content, then climb in and edit it (regexes, RE2)
+  find  f      first match of a regex, highlighted; find next / fn steps on
+  replace  r   step through matches swapping each, preview-first; /old/new/
+  replace all  swap every match in one undoable pass; replace all /old/new/
+
+  Ctrl+F / Ctrl+R seed the line with find / replace. After a hit the prompt
+  arms "<verb> next" — Enter steps (rn = replace next), Esc clears, and a
+  climb key edits the highlighted match. The delimiter is any non-letter, so
+  replace ,old,new, sidesteps escaping a slash.
 
 SESSION
   s [name]     save; a name is required when unnamed (also Ctrl+S)

@@ -26,6 +26,15 @@ type searchState struct {
 
 	line   int // 0-based buffer line of the current match
 	lo, hi int // rune range [lo,hi) of the match within that line
+
+	// Replace fields, set when the armed search is a substitution rather than a
+	// bare find. isRepl distinguishes the two; repl is the replacement text (Go
+	// regexp expansion, so $1 references a capture group); count tallies the
+	// replacements made so far, for the "replaced N" report. The highlighted match
+	// is then the pending OLD candidate — preview-first, replace next applies it.
+	isRepl bool
+	repl   string
+	count  int
 }
 
 // findDispatch handles the search command family: `find`/`f` with a pattern
@@ -36,6 +45,10 @@ type searchState struct {
 // blanket-clear r.last: a successful find prints a climbable block and must keep
 // it, so each branch manages r.last itself.
 func (r *repl) findDispatch(s string) bool {
+	if s == "fn" { // short for find next
+		r.findNext()
+		return true
+	}
 	rest, ok := cutVerb(s, "find", "f")
 	if !ok {
 		return false

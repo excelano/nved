@@ -35,6 +35,7 @@ const (
 	keyCtrlX
 	keyCtrlU
 	keyCtrlF
+	keyCtrlR
 )
 
 type key struct {
@@ -126,6 +127,8 @@ func (rd *reader) readKey() (key, bool) {
 		return key{kind: keyCtrlU}, true
 	case b == 0x06:
 		return key{kind: keyCtrlF}, true
+	case b == 0x12:
+		return key{kind: keyCtrlR}, true
 	case b < 0x20:
 		return key{kind: keyUnknown}, true
 	case b < 0x80:

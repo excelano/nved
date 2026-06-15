@@ -283,6 +283,11 @@ func (r *repl) readCommand() cmdResult {
 			out("\r" + csiEL + prompt + "find ")
 			line = []rune("find ")
 			armed = false
+		case keyCtrlR:
+			// The replace twin of Ctrl+F: seed "replace ", ready for /old/new/.
+			out("\r" + csiEL + prompt + "replace ")
+			line = []rune("replace ")
+			armed = false
 		case keyCtrlU:
 			if len(line) == 0 {
 				out("\r\n")

@@ -52,6 +52,10 @@ independent but still has an open addressing crux, so it follows once that desig
 pass is done. Slices below are numbered by the original plan; build sequence is
 2 → 3 → 1.
 
+**STATUS 2026-06-14: find (2) and replace (3) BUILT + dogfooded, on `main`,
+unreleased.** Pending: tag (v0.8.0 find, v0.9.0 replace — or bundle). Columns (1)
+is the last v1 slice; its addressing crux still needs a design pass before code.
+
 1. **Slice 4 — structural columns** (`col add` / `col del`). UNPARKED — David was
    reaching for it dogfooding wide CSVs. Confirm-on-delete already decided.
    **Open crux (its own discussion, NOT small): columns have no on-screen
@@ -62,25 +66,34 @@ pass is done. Slices below are numbered by the original plan; build sequence is
    which deliberately suppresses structural edits). Command-vs-chord
    (`col add`/`col del` vs Ctrl+Insert/Ctrl+Delete) rides on this choice.
 
-2. **Search — `find <regex>`** (short **`f`**) — LOCKED 2026-06-14 as a word
+2. **Search — `find <regex>`** (short **`f`**) — BUILT 2026-06-14 as a word
    command (rest of line = the pattern, like `head 10`). Go `regexp` (RE2). Chosen
    OVER a `/regex/` slash-address: word+letter matches nved's verb shape (save/s,
-   exit/x, find/f). **Find-next spelling RESOLVED 2026-06-14: it is a literal
-   `find next` / `f next` subcommand** — the interaction model (below) leaves that
-   exact string sitting in the command line, so "next" is just a typed word, no
-   collision with bare-reports-state (bare `find`/`f` still REPORTS state).
+   exit/x, find/f). **Find-next spelling RESOLVED: it is a literal `find next` /
+   `f next` subcommand** (also short **`fn`**) — the interaction model (below)
+   leaves that exact string sitting in the command line, so "next" is just a typed
+   word, no collision with bare-reports-state (bare `find`/`f` still REPORTS state).
 
-3. **Substitution — `replace /old/new/g`** (short **`r`**) — LOCKED 2026-06-14.
+3. **Substitution — `replace /old/new/`** (short **`r`**) — BUILT 2026-06-14.
    Verb is NOT `s` (taken by save; ed only gets away with `s` because its save is
    `w`). **ed-style any-delimiter:** the first char after the verb is the delimiter
    (`r ,old,new,`). **Space after the verb in the documented form, no-space also
    accepted** (`r /…/` and `r/…/` both parse — skip optional ws after the verb,
    next char = delim). **Guard: delimiter must be non-alphanumeric** — the sane
    reading of "any delimiter" that kills the no-space word-form footgun (`replaced`
-   → `d`-delimited) and the `rows`/`r` ambiguity. RE2; one undo entry per run.
-   **Help and docs use `/` as the delimiter in examples** (David's call) even though
-   any non-alnum char works. `f`/`r` collide with ed's `f`=filename / `r`=read (nved
-   uses neither; spent-symbol note, accepted).
+   → `d`-delimited) and the `rows`/`r` ambiguity. RE2. Capture-group backrefs in
+   the replacement (`$1`, Go regexp expansion). `f`/`r` collide with ed's
+   `f`=filename / `r`=read (nved uses neither; spent-symbol note, accepted).
+
+   **REVISED 2026-06-14 (David, mid-build): global is the `all` keyword, NOT a
+   `/g` suffix** — `replace all /old/new/` reads as nved's verbose idiom (also
+   `r all /…/` and the short `ra /…/`). One undo entry for the whole `all` run;
+   each preview-first step is its own undo entry. **Short forms added: `fn` = find
+   next, `rn` = replace next, `ra` = replace all.** **Scope RESOLVED: buffer-wide
+   throughout** (replace = find's twin) — the spec's "non-/g acts within the
+   printed block" line was internally inconsistent with "next is buffer-spanning";
+   range-scoped replace is a clean ADDITIVE mode for later if dogfooding wants it,
+   not the default. Examples use `/` as the delimiter (David's call).
 
    **Shared interaction model — LOCKED 2026-06-14 (find + replace are twins):**
    - **Chords seed the command line.** `Ctrl+f` inserts `find ` at the prompt;
@@ -101,15 +114,17 @@ pass is done. Slices below are numbered by the original plan; build sequence is
    - **replace is preview-first (confirm-each).** Enter on `replace /old/new/`
      highlights the first OLD match UNCHANGED (nothing written yet). `replace next`
      replaces the highlighted match and advances the highlight to the next OLD
-     match. `replaced N` when exhausted. **`/g` is the escape hatch: replace ALL in
-     scope at once, no stepping.** Safer default — you see before you change.
+     match. `replaced N` when exhausted. **`replace all /old/new/` is the escape
+     hatch: replace ALL at once, no stepping.** Safer default — you see before you
+     change.
    - **Backspace is NOT overloaded** (David's call): it deletes one char at a time,
      same as always — the user clears the armed line by holding Backspace, or with
-     one **Esc**.
+     one **Esc**. (Consequence: typing onto an armed `… next` seed APPENDS to it —
+     `fn`/`rn` are empty-prompt entry points; when armed you just press Enter.)
    - **Zero matches** → report "no match" and do NOT arm `next`.
-   - **Scope** for the non-`/g` block form of replace: the printed block (dial in
-     with `10.20`, then `replace /foo/bar/` acts within it and reprints). `next`
-     and `/g`-wide are the buffer-spanning forms.
+   - **Scope: buffer-wide** for both stepping and `all` (see item 3 — the earlier
+     block-scope line was dropped as inconsistent; additive range-scope possible
+     later).
 
 Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
 still THEORETICAL (never hit in dogfooding); stays backlog as correctness
