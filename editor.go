@@ -807,6 +807,9 @@ func (e *editor) undo() editAction {
 	if entry.line < lo || entry.line > hi {
 		return actUndo
 	}
+	if e.count+entry.lineDelta < 1 { // undo would shrink the block below one line
+		return actUndo // hand off so the prompt path reprints it instead
+	}
 	e.r.b.popUndo()
 	prePhysRow, _ := e.physCursor()
 	entry.apply(e.r.b)

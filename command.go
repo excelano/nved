@@ -340,7 +340,8 @@ DELIMITED VIEW — opt-in; a file opens as plain text until you ask
                        0 prepends
   kill column N        delete column N from every row, after a confirm — kc N
 
-  A bare dsv / quotes / headers / linebreaks / wrap reports its current state.
+  A bare dsv / quotes / headers / linebreaks / wrap reports its current state,
+  and a bare rows the line count.
   In an aligned block, Tab / Shift-Tab move field to field and the grid
   re-aligns as you type. Editing changes the field value only — the delimiter
   (it is data inside a "quoted" cell) and mid-cell Enter-split are suppressed;

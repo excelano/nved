@@ -300,5 +300,51 @@ widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
   buffer-wide `find next` walk + climb-on-highlight handoff IS "find by content,
   not by counting." Kept here only as the lineage note; ved still has the same
   open gap (BRE engine present, address hook deferred).
+- **USV (Unicode Separated Values) separators — post-1.0, no commitment.** USV is
+  ASV's sibling: same structure, but visible Unicode glyphs instead of the
+  invisible control bytes — ␟ U+241F (field) and ␞ U+241E (row), the printable
+  "Symbol for Unit/Record Separator" code points. A `usv` preset (field U+241F +
+  record U+241E) would ride the EXACT two-layer machinery `asv` already uses. Why
+  it's a clean fit, unlike syntax highlighting: it's BOUNDED (a fixed, tiny
+  separator set — done when both glyphs are in, no treadmill), CHEAP (a USV
+  separator is a normal printable rune, width 1 — nved is rune-aware end to end, so
+  it's a non-event for the cursor/window math; the opposite of injecting control
+  codes into the render), and ON-IDENTITY (nved is uniquely the lightweight
+  hand-author tool for ASV — see [[project_nved]] "Positioning"; USV interop with
+  VisiData / the asv↔usv converters completes that story). One impl thing to
+  verify, not assume: whether the record separator is stored wide enough to hold a
+  multi-byte rune (asv's record sep 0x1E fits in a byte; U+241E does not — may need
+  a small widening). SCOPE LIMIT: only **flat USV** (unit + record). Henderson's
+  full USV spec also defines Group (␝) and File (␜) separators for *nested*
+  data, which nved (flat rows × columns) structurally can't represent — same flat
+  subset as nved's ASV. GATE: build it when a USV file actually turns up in
+  dogfooding, OR on a deliberate "the completeness is worth the near-zero cost"
+  call for a v1.1. NOT a 1.0 blocker — 1.0 is hardening, and David hasn't hit USV
+  data in the wild yet (the "grows only by dogfood friction" guardrail says wait).
+- **Markdown view — PARKED, leaning NO (2026-06-15).** Triggered by real friction:
+  David left nved for nano to *read* a markdown file with source highlighting.
+  Kicked around hard; parked deliberately to sit on. **The decisive argument
+  AGAINST: the friction was a READING need, and nved is an editor, not a reader.**
+  David confirmed his markdown use here is read-only — which is exactly the case
+  for *not* building it (a pager like `bat`/`glow` is the right-tool answer for
+  reading; nved shouldn't grow to do everything). Two more cautions: (a) it's a
+  *read-decoration*, a genuinely NEW axis for nved, NOT an extension of the DSV
+  *structural-editing* model (I'd over-unified them); (b) the "data + docs"
+  boundary is softer than it sounds — once you accept read-decoration, YAML / JSON
+  / `.env` / logs are the same kind of thing, and the slope is right there.
+  **IF ever revisited, the tightly-scoped shape that survived the kicking** (and
+  the ONLY shape worth it): a brightness/weight-led **markdown VIEW** (bold
+  headings, faint fences, dim list/quote markers — nved's existing faint-cue
+  vocabulary applied to structure, NOT chromatic syntax coloring, so
+  [[user_color_vision]] mostly dissolves); **print-time only**, raw on climb-in
+  (same display-vs-edit split as DSV — the live cursor/reflow math never carries
+  SGR); **high-precision constructs ONLY** — headings, code fences, blockquotes,
+  list markers, links; **DROP emphasis** (`*`/`_`) because naive regex mis-fires on
+  `snake_case` / URLs / math and wrong highlighting reads worse than none;
+  hand-written regex in nved's source, **NO grammar engine, NO plugins, NO
+  user-defined languages**; named **"markdown view," NOT "syntax highlighting"** so
+  the name itself can't recruit other formats. Markdown ONLY — code-language
+  highlighting stays a hard no (that's the IDE slope; `bat` exists). NOT a 1.0
+  thing regardless.
 - **v1.0 hardening** — SECURITY.md, Dependabot, CodeQL (deferred from the initial
   releases).

@@ -92,6 +92,12 @@ The printed block sits just above the prompt. Climb into it to edit:
 - **Ctrl+S** saves in place without leaving (your cursor stays put); **Ctrl+X** exits — the save and exit chords work while editing, just as at the prompt.
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 
+Two structural edits are typed at the prompt rather than done with the cursor:
+`insert row [N]` — short `ir` — opens a blank line after line N (a bare `insert
+row` appends at the end, `0` prepends), and `kill row N` (`kr`) deletes line N, or
+an `N.M` range. Deleting a range asks first; deleting a single line does not. Both
+are a single **Ctrl+U** undo, and a bare `rows` reports the line count.
+
 Long lines are word-wrapped by nved itself, with a continuation indent that lines
 the wrapped text up under the gutter. `wrap off` turns that off: each line then
 takes a single row, and a line wider than the terminal shows a faint `‹` or `›`
@@ -100,6 +106,23 @@ cursor, the gutter held fixed at the left. It is the plain-text counterpart of t
 aligned column view's horizontal pan. `wrap on` restores wrapping, and a bare
 `wrap` reports the current setting. Edits stay inside the printed block; to edit
 elsewhere, print that range and climb into it.
+
+## Finding and replacing
+
+`find <regex>` — short `f` — searches the whole buffer for a Go regular expression
+(RE2), jumps to the first match, and highlights it; `find next` (or `fn`) steps to
+the next one and wraps back to the top at the end. `replace /old/new/` (`r`) is its
+twin: it highlights the first match *unchanged*, then each `replace next` (`rn`)
+swaps the highlighted match and advances, so you confirm each change as you go.
+When you would rather not step, `replace all /old/new/` (`ra`) swaps every match in
+one undoable pass.
+
+The delimiter is any non-letter character, so `replace ,old,new,` sidesteps
+escaping a slash, and capture groups expand in the replacement as `$1`, `$2`.
+**Ctrl+F** and **Ctrl+R** seed the prompt with `find ` and `replace `; after a
+match the prompt arms the next step, so **Enter** repeats it and **Esc** clears it,
+and climbing in with **Up** or **Left** drops the cursor straight onto the
+highlighted match — find a line by its content, then edit it in place.
 
 ## Viewing delimited files (CSV, TSV, DSV)
 
@@ -119,10 +142,10 @@ their own:
 | `dsv off`              | back to plain text                                    |
 | `quotes on\|off`       | respect `"quoted,fields"` when splitting              |
 | `headers on\|off`      | draw line 1 as a faint column header, pinned when it scrolls off |
-| `rows newline\|record` | the record separator (`record` is the ASCII record separator, 0x1E) |
-| `csv` `tsv` `asv`      | presets — `csv` is `dsv ,` with quotes and headers on, `tsv` the same with tabs, `asv` the ASCII-separated set (`unit` fields, `record` rows); `csv off` (or `tsv`/`asv off`) is `dsv off` |
+| `linebreaks newline\|record` | the record separator (`record` is the ASCII record separator, 0x1E) |
+| `csv` `tsv` `asv`      | presets — `csv` is `dsv ,` with quotes and headers on, `tsv` the same with tabs, `asv` the ASCII-separated set (`unit` between fields, `record` between rows); `csv off` (or `tsv`/`asv off`) is `dsv off` |
 
-Each switch invoked bare — `dsv`, `quotes`, `headers`, `rows` — reports its
+Each switch invoked bare — `dsv`, `quotes`, `headers`, `linebreaks` — reports its
 current state instead of changing it. Columns are sized to the widest cell on
 screen, and the delimiter itself is drawn faint in the gap between them, so a row
 reads `a , b` — you see what actually separates the fields, the same reason
@@ -150,10 +173,20 @@ Editing changes the field value only: the delimiter key is swallowed, and
 `Enter`-split and row joins are suppressed, so you can't accidentally restructure
 the file from inside a cell. The one exception is a quoted cell — inside the
 quotes the delimiter is data, so typing a comma in `"a,b"` works; to put one in a
-plain cell, quote it first by typing `"` at each end. For structural edits —
-splitting a row, adding a column — `dsv off` back to plain text. A quoted field
-keeps its quotes on screen and on save, so you always see which cells are quoted
-and which aren't.
+plain cell, quote it first by typing `"` at each end.
+
+Whole columns and rows are edited by command rather than from inside a cell.
+Columns have no line number, so `columns` (or `c`) prints a faint index ruler above
+the grid, numbering them from the left; `insert column [N]` — short `ic` — adds an
+empty column to the right of column N (a bare `insert column` appends, `0`
+prepends), and `kill column N` (`kc`) removes column N from every row after a
+confirmation, naming the column when headers are on. Row insert and delete —
+`insert row` / `ir` and `kill row` / `kr`, described above — work here too, the row
+insert carrying one empty field per column so it lines up. Each column or row edit
+is a single undo; for free-form restructuring, `dsv off` returns to plain text.
+
+A quoted field keeps its quotes on screen and on save, so you always see which
+cells are quoted and which aren't.
 
 ## License
 

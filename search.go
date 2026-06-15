@@ -187,12 +187,15 @@ func searchForward(lines []string, re *regexp.Regexp, fromLine, fromRune int) (l
 		if d == 0 && fromRune > 0 {
 			startByte = runeToByte(text, fromRune)
 		}
-		loc := re.FindStringIndex(text[startByte:])
-		if loc == nil {
-			continue
+		// Match against the full line, not text[startByte:], so anchors like ^,
+		// $ and \b keep their meaning instead of re-anchoring at the offset. Take
+		// the first match that starts at or after startByte.
+		for _, loc := range re.FindAllStringIndex(text, -1) {
+			if loc[0] < startByte {
+				continue
+			}
+			return li, utf8.RuneCountInString(text[:loc[0]]), utf8.RuneCountInString(text[:loc[1]]), fromLine+d >= n, true
 		}
-		bLo, bHi := startByte+loc[0], startByte+loc[1]
-		return li, utf8.RuneCountInString(text[:bLo]), utf8.RuneCountInString(text[:bHi]), fromLine+d >= n, true
 	}
 	return 0, 0, 0, false, false
 }

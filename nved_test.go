@@ -1963,3 +1963,49 @@ func TestPrintColumnsRendersRuler(t *testing.T) {
 		t.Errorf("ruler (row %d) must sit above the header (row %d)", rulerAt, headerAt)
 	}
 }
+
+// A splitLine undo whose block has shrunk to show only the upper half must not
+// collapse the editor block to zero lines (which later panicked on a move via
+// clamp(_, 0, -1)). It hands off to the prompt-level undo instead.
+func TestUndoDoesNotCollapseBlock(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"foo"}, 80, 24)
+	e := &editor{r: r, start: 1, count: 1, cy: 0, cx: 1}
+	e.splitLine() // "f" / "oo"; count -> 2, pushes a split undo (lineDelta -1)
+	if e.count != 2 || len(r.b.lines) != 2 {
+		t.Fatalf("split: count=%d lines=%d, want 2/2", e.count, len(r.b.lines))
+	}
+	// Simulate reprinting only the upper half and climbing back into a 1-line
+	// block sitting on the split point; the split-undo entry is still queued.
+	e.count, e.cy, e.cx = 1, 0, 0
+	if act := e.undo(); act != actUndo {
+		t.Fatalf("undo of a split into a 1-line block should hand off (actUndo), got %v", act)
+	}
+	if e.count != 1 {
+		t.Fatalf("block must not collapse to zero: count=%d, want 1", e.count)
+	}
+	// The handoff path applies the queued entry correctly, rejoining the line.
+	r.undoAtPrompt()
+	if len(r.b.lines) != 1 || r.b.lines[0] != "foo" {
+		t.Fatalf("prompt undo should rejoin to %q (1 line), got %q (%d lines)", "foo", r.b.lines[0], len(r.b.lines))
+	}
+}
+
+// A zero-width match (e.g. the ^ anchor) replaced with empty text once looped
+// forever: the next-match scan restarted at the same rune. replaceNext must
+// step past a zero-width, no-insert replacement so the stepping terminates.
+func TestReplaceNextZeroWidthTerminates(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"abc"}, 80, 24)
+	r.replaceDispatch("replace /^//") // old "^" (zero-width), new "" (empty)
+	steps := 0
+	for r.search != nil && steps < 10 {
+		r.replaceDispatch("replace")
+		steps++
+	}
+	if r.search != nil {
+		t.Fatalf("zero-width empty replacement should terminate, still armed after %d steps: %+v", steps, r.search)
+	}
+}

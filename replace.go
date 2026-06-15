@@ -201,7 +201,11 @@ func (r *repl) replaceNext() {
 	})
 	cur.count++
 
-	line, lo, hi, wrapped, found := searchForward(r.b.lines, cur.re, li, cur.lo+len([]rune(newText)))
+	from := cur.lo + len([]rune(newText))
+	if cur.hi == cur.lo && newText == "" { // zero-width match, nothing inserted: step past it
+		from = cur.lo + 1
+	}
+	line, lo, hi, wrapped, found := searchForward(r.b.lines, cur.re, li, from)
 	if found && !wrapped {
 		cur.line, cur.lo, cur.hi = line, lo, hi
 		r.showMatch()
