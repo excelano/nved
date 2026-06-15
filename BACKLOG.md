@@ -52,9 +52,10 @@ independent but still has an open addressing crux, so it follows once that desig
 pass is done. Slices below are numbered by the original plan; build sequence is
 2 → 3 → 1.
 
-**STATUS 2026-06-14: find (2) and replace (3) BUILT + dogfooded, on `main`,
-unreleased.** Pending: tag (v0.8.0 find, v0.9.0 replace — or bundle). Columns (1)
-is the last v1 slice; its addressing crux still needs a design pass before code.
+**STATUS 2026-06-14: find (2) and replace (3) SHIPPED as one bundle — v0.8.0**
+(David's call: one tag, not separate v0.8.0/v0.9.0). Columns (1) is the last v1
+slice → v0.9.0; its addressing crux still needs a design pass before code. v1.0.0
+stays the hardening milestone.
 
 1. **Slice 4 — structural columns** (`col add` / `col del`). UNPARKED — David was
    reaching for it dogfooding wide CSVs. Confirm-on-delete already decided.
