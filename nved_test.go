@@ -1265,24 +1265,28 @@ func TestSaveRecordSep(t *testing.T) {
 	}
 }
 
-func TestRowsCommand(t *testing.T) {
+func TestLinebreaksCommand(t *testing.T) {
 	r := newRepl([]string{"a\x1eb\x1ec"}, 80, 24)
 	r.last = &block{start: 1, count: 1}
-	if !r.dsvDispatch("rows record") || r.b.sep() != '\x1e' {
-		t.Fatalf("rows record -> sep=%q", r.b.sep())
+	if !r.dsvDispatch("linebreaks record") || r.b.sep() != '\x1e' {
+		t.Fatalf("linebreaks record -> sep=%q", r.b.sep())
 	}
 	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", "c"}) {
-		t.Fatalf("rows record should re-line: %q", r.b.lines)
+		t.Fatalf("linebreaks record should re-line: %q", r.b.lines)
 	}
 	if r.last != nil {
-		t.Error("rows should clear r.last (a reload resets the block)")
+		t.Error("linebreaks should clear r.last (a reload resets the block)")
 	}
-	if !r.dsvDispatch("rows newline") || r.b.sep() != '\n' {
-		t.Fatalf("rows newline -> sep=%q", r.b.sep())
+	if !r.dsvDispatch("linebreaks newline") || r.b.sep() != '\n' {
+		t.Fatalf("linebreaks newline -> sep=%q", r.b.sep())
 	}
-	// A bad argument is matched (it is a rows command) but changes nothing.
-	if !r.dsvDispatch("rows tab") || r.b.sep() != '\n' {
-		t.Errorf("rows tab should be rejected, sep=%q", r.b.sep())
+	// A bad argument is matched (it is a linebreaks command) but changes nothing.
+	if !r.dsvDispatch("linebreaks tab") || r.b.sep() != '\n' {
+		t.Errorf("linebreaks tab should be rejected, sep=%q", r.b.sep())
+	}
+	// The old `rows` verb is no longer a dsv command — it belongs to structDispatch.
+	if r.dsvDispatch("rows record") {
+		t.Error("rows should no longer be a dsv command (renamed to linebreaks)")
 	}
 }
 
@@ -1293,14 +1297,14 @@ func TestRowsClauseInState(t *testing.T) {
 	// trap that an asv preset followed by dsv off used to spring silently.
 	r := newRepl([]string{"a\x1eb"}, 80, 24)
 	if got := r.dsvState(); got != "delimiter: off — plain text" {
-		t.Errorf("newline-lined off state = %q, want no rows clause", got)
+		t.Errorf("newline-lined off state = %q, want no linebreaks clause", got)
 	}
 	r.b.reline('\x1e')
-	if got := r.dsvState(); got != "delimiter: off — plain text, rows record" {
-		t.Errorf("record-lined off state = %q, want trailing rows clause", got)
+	if got := r.dsvState(); got != "delimiter: off — plain text, linebreaks record" {
+		t.Errorf("record-lined off state = %q, want trailing linebreaks clause", got)
 	}
 	r.delim, r.quotes, r.headers = '\x1f', false, true
-	want := "delimiter: unit separator (0x1F), quotes off, headers on, rows record"
+	want := "delimiter: unit separator (0x1F), quotes off, headers on, linebreaks record"
 	if got := r.dsvState(); got != want {
 		t.Errorf("record-lined asv state = %q, want %q", got, want)
 	}
@@ -1501,22 +1505,22 @@ func TestFindHighlightsMatch(t *testing.T) {
 
 func TestParseReplaceSpec(t *testing.T) {
 	cases := []struct {
-		spec          string
-		old, repl     string
-		wantErr       bool
+		spec      string
+		old, repl string
+		wantErr   bool
 	}{
 		{"/old/new/", "old", "new", false},
 		{"/old/new", "old", "new", false},   // trailing delimiter optional
 		{" /old/new/", "old", "new", false}, // leading space (verb-space form)
 		{",a,b,", "a", "b", false},          // any non-alnum delimiter
 		{"#a#b#", "a", "b", false},
-		{"/foo/", "foo", "", false},         // replace with empty = delete
-		{"/a/b/c/", "", "", true},           // text past closing delimiter
-		{"xoldxnewx", "", "", true},         // alphanumeric delimiter rejected
-		{"3a3b3", "", "", true},             // digit delimiter rejected
-		{"", "", "", true},                  // empty
-		{"/only", "", "", true},             // no closing delimiter
-		{"//new/", "", "", true},            // empty old pattern
+		{"/foo/", "foo", "", false}, // replace with empty = delete
+		{"/a/b/c/", "", "", true},   // text past closing delimiter
+		{"xoldxnewx", "", "", true}, // alphanumeric delimiter rejected
+		{"3a3b3", "", "", true},     // digit delimiter rejected
+		{"", "", "", true},          // empty
+		{"/only", "", "", true},     // no closing delimiter
+		{"//new/", "", "", true},    // empty old pattern
 	}
 	for _, c := range cases {
 		old, repl, err := parseReplaceSpec(c.spec)
@@ -1539,8 +1543,8 @@ func TestReplaceVerbMatching(t *testing.T) {
 		{"r", "r", "", true},
 		{"r /a/b/", "r", " /a/b/", true},
 		{"r/a/b/", "r", "/a/b/", true},
-		{"rows", "r", "", false},      // alnum after r
-		{"rn", "r", "", false},        // short form not a bare-r match
+		{"rows", "r", "", false}, // alnum after r
+		{"rn", "r", "", false},   // short form not a bare-r match
 		{"ra/a/b/", "ra", "/a/b/", true},
 		{"replace", "replace", "", true},
 	} {
@@ -1691,12 +1695,12 @@ func newColRepl(t *testing.T, lines []string) *repl {
 
 func TestColumnsInsert(t *testing.T) {
 	r := newColRepl(t, []string{"name,age", "alice,30", "bob,7"})
-	if !r.columnsDispatch("ci 1") { // right of column 1
-		t.Fatal("ci 1 should be a column command")
+	if !r.structDispatch("ic 1") { // right of column 1
+		t.Fatal("ic 1 should be a structural command")
 	}
 	want := []string{"name,,age", "alice,,30", "bob,,7"}
 	if !reflect.DeepEqual(r.b.lines, want) {
-		t.Fatalf("ci 1 -> %q, want %q", r.b.lines, want)
+		t.Fatalf("ic 1 -> %q, want %q", r.b.lines, want)
 	}
 	if !r.b.modified {
 		t.Error("a column insert should mark the buffer modified")
@@ -1704,19 +1708,19 @@ func TestColumnsInsert(t *testing.T) {
 	// Undo reverts the whole op in one step.
 	r.undoAtPrompt()
 	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30", "bob,7"}) {
-		t.Errorf("undo of ci -> %q", r.b.lines)
+		t.Errorf("undo of ic -> %q", r.b.lines)
 	}
 }
 
 func TestColumnsInsertAppendAndPrepend(t *testing.T) {
 	r := newColRepl(t, []string{"a,b", "c,d"})
-	r.columnsDispatch("ci") // bare: append at the far right
+	r.structDispatch("ic") // bare: append at the far right
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b,", "c,d,"}) {
-		t.Fatalf("bare ci -> %q", r.b.lines)
+		t.Fatalf("bare ic -> %q", r.b.lines)
 	}
-	r.columnsDispatch("columns insert 0") // long form, prepend
+	r.structDispatch("insert column 0") // long form, prepend
 	if !reflect.DeepEqual(r.b.lines, []string{",a,b,", ",c,d,"}) {
-		t.Fatalf("insert 0 -> %q", r.b.lines)
+		t.Fatalf("insert column 0 -> %q", r.b.lines)
 	}
 }
 
@@ -1726,12 +1730,12 @@ func TestColumnsKillConfirmed(t *testing.T) {
 	pw.WriteString("y\r")
 	pw.Close()
 	r.rd = &reader{in: pr}
-	if !r.columnsDispatch("ck 2") {
-		t.Fatal("ck 2 should be a column command")
+	if !r.structDispatch("kc 2") {
+		t.Fatal("kc 2 should be a structural command")
 	}
 	want := []string{"name,city", "alice,rome", "bob,pisa"}
 	if !reflect.DeepEqual(r.b.lines, want) {
-		t.Fatalf("ck 2 (confirmed) -> %q, want %q", r.b.lines, want)
+		t.Fatalf("kc 2 (confirmed) -> %q, want %q", r.b.lines, want)
 	}
 }
 
@@ -1741,7 +1745,7 @@ func TestColumnsKillCancelled(t *testing.T) {
 	pw.WriteString("n\r")
 	pw.Close()
 	r.rd = &reader{in: pr}
-	r.columnsDispatch("ck 2")
+	r.structDispatch("kill column 2") // long form
 	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30"}) {
 		t.Errorf("a cancelled kill must change nothing, got %q", r.b.lines)
 	}
@@ -1752,13 +1756,13 @@ func TestColumnsKillCancelled(t *testing.T) {
 
 func TestColumnsKillBareErrors(t *testing.T) {
 	r := newColRepl(t, []string{"a,b", "c,d"})
-	r.columnsDispatch("ck") // no column number — destructive, must refuse
+	r.structDispatch("kc") // no column number — destructive, must refuse
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
-		t.Errorf("bare ck must change nothing, got %q", r.b.lines)
+		t.Errorf("bare kc must change nothing, got %q", r.b.lines)
 	}
-	r.columnsDispatch("ck 9") // out of range
+	r.structDispatch("kc 9") // out of range
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
-		t.Errorf("out-of-range ck must change nothing, got %q", r.b.lines)
+		t.Errorf("out-of-range kc must change nothing, got %q", r.b.lines)
 	}
 }
 
@@ -1766,7 +1770,7 @@ func TestColumnsQuotedRoundTrip(t *testing.T) {
 	// A quoted field with an embedded delimiter must survive a column insert
 	// verbatim — the raw-cell join keeps its quotes and inner comma intact.
 	r := newColRepl(t, []string{`a,"b,c",d`})
-	r.columnsDispatch("ci 2") // right of the quoted field
+	r.structDispatch("ic 2") // right of the quoted field
 	if r.b.lines[0] != `a,"b,c",,d` {
 		t.Fatalf("quoted round-trip -> %q, want %q", r.b.lines[0], `a,"b,c",,d`)
 	}
@@ -1776,7 +1780,7 @@ func TestColumnsUnbalancedAborts(t *testing.T) {
 	// With quotes on, a line that won't parse must abort the whole op untouched.
 	r := newColRepl(t, []string{"a,b", `c,"unterminated`})
 	before := append([]string(nil), r.b.lines...)
-	r.columnsDispatch("ci 1")
+	r.structDispatch("ic 1")
 	if !reflect.DeepEqual(r.b.lines, before) {
 		t.Errorf("an unbalanced-quote line must abort the op, got %q", r.b.lines)
 	}
@@ -1789,7 +1793,7 @@ func TestColumnsDsvOnly(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"a,b", "c,d"}, 80, 24) // no delimiter set
-	r.columnsDispatch("ci 1")
+	r.structDispatch("ic 1")
 	if r.b.modified || !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
 		t.Errorf("columns outside dsv must be a no-op, got %q modified=%v", r.b.lines, r.b.modified)
 	}
@@ -1805,13 +1809,126 @@ func TestColumnRuler(t *testing.T) {
 	}
 }
 
-func TestColumnsDispatchFallThrough(t *testing.T) {
+// --- rows ------------------------------------------------------------------
+
+func TestRowsInsert(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"one", "two", "three"}, 80, 24)
+	if !r.structDispatch("ir 1") { // blank line after line 1
+		t.Fatal("ir 1 should be a structural command")
+	}
+	want := []string{"one", "", "two", "three"}
+	if !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("ir 1 -> %q, want %q", r.b.lines, want)
+	}
+	if !r.b.modified {
+		t.Error("a row insert should mark the buffer modified")
+	}
+	r.undoAtPrompt() // one step reverts it
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two", "three"}) {
+		t.Errorf("undo of ir -> %q", r.b.lines)
+	}
+}
+
+func TestRowsInsertAppendPrependAndShape(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	// Plain text: bare append adds an empty line at the end, 0 prepends.
+	r := newRepl([]string{"a", "b"}, 80, 24)
+	r.structDispatch("insert row") // bare append
+	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", ""}) {
+		t.Fatalf("bare insert row -> %q", r.b.lines)
+	}
+	r.structDispatch("ir 0") // prepend
+	if !reflect.DeepEqual(r.b.lines, []string{"", "a", "b", ""}) {
+		t.Fatalf("ir 0 -> %q", r.b.lines)
+	}
+	// Delimited: the blank record carries one empty field per column so it aligns.
+	d := newRepl([]string{"x,y,z", "1,2,3"}, 80, 24)
+	d.delim, d.quotes, d.headers = ',', true, true
+	d.structDispatch("ir 1")
+	if d.b.lines[1] != ",," { // 3 empty fields
+		t.Fatalf("delimited insert row shape -> %q, want %q", d.b.lines[1], ",,")
+	}
+}
+
+func TestRowsKillSingleNoConfirm(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"one", "two", "three"}, 80, 24)
+	r.structDispatch("kr 2") // a single line: no confirm
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "three"}) {
+		t.Fatalf("kr 2 -> %q", r.b.lines)
+	}
+	r.undoAtPrompt()
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two", "three"}) {
+		t.Errorf("undo of kr -> %q", r.b.lines)
+	}
+}
+
+func TestRowsKillRangeConfirmed(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"1", "2", "3", "4", "5"}, 80, 24)
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("y\r")
+	pw.Close()
+	r.rd = &reader{in: pr}
+	r.structDispatch("kill row 2.4") // a range: confirms, reuses parseAddress
+	if !reflect.DeepEqual(r.b.lines, []string{"1", "5"}) {
+		t.Fatalf("kill row 2.4 (confirmed) -> %q", r.b.lines)
+	}
+}
+
+func TestRowsKillRangeCancelled(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"1", "2", "3", "4"}, 80, 24)
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("n\r")
+	pw.Close()
+	r.rd = &reader{in: pr}
+	r.structDispatch("kr 2.3")
+	if !reflect.DeepEqual(r.b.lines, []string{"1", "2", "3", "4"}) {
+		t.Errorf("a cancelled range kill must change nothing, got %q", r.b.lines)
+	}
+}
+
+func TestRowsKillRefusesAll(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"only", "two"}, 80, 24)
+	pr, pw, _ := os.Pipe()
+	pw.WriteString("y\r")
+	pw.Close()
+	r.rd = &reader{in: pr}
+	r.structDispatch("kr 1.2") // would empty the buffer — refused before the confirm
+	if !reflect.DeepEqual(r.b.lines, []string{"only", "two"}) {
+		t.Errorf("killing every line must be refused, got %q", r.b.lines)
+	}
+}
+
+func TestRowsBareReportsCount(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a", "b", "c"}, 80, 24)
+	r.last = &block{start: 1, count: 3}
+	if !r.structDispatch("rows") { // bare noun reports state
+		t.Fatal("bare rows should be a structural command")
+	}
+	if r.last != nil {
+		t.Error("a bare rows report should clear r.last")
+	}
+}
+
+func TestStructDispatchFallThrough(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"hello"}, 80, 24)
-	for _, s := range []string{"csv", "clear", "category", "5.10", "5"} {
-		if r.columnsDispatch(s) {
-			t.Errorf("%q should not match columnsDispatch", s)
+	for _, s := range []string{"csv", "clear", "category", "insertion", "killer", "5.10", "5"} {
+		if r.structDispatch(s) {
+			t.Errorf("%q should not match structDispatch", s)
 		}
 	}
 }

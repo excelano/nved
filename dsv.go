@@ -15,7 +15,7 @@ import (
 // this state lands in step 2.
 
 // dsvDispatch handles the DSV command family — the field-layer dsv, quotes, and
-// headers, plus the record-layer rows — and reports whether s was one of them so
+// headers, plus the record-layer linebreaks — and reports whether s was one of them so
 // the main dispatch can fall through to address parsing when it isn't. A bare
 // verb reports current state; an argument sets it. Like every command that prints
 // below the block, these clear r.last: the report sits between the block and the
@@ -34,28 +34,28 @@ func (r *repl) dsvDispatch(s string) bool {
 		emitf("headers: %s\n", onOff(r.headers))
 	case strings.HasPrefix(s, "headers "):
 		onOffArg("headers", strings.TrimPrefix(s, "headers "), &r.headers)
-	case s == "rows":
-		emitf("rows: %s\n", rowsName(r.b.sep()))
-	case s == "rows newline":
+	case s == "linebreaks":
+		emitf("linebreaks: %s\n", rowsName(r.b.sep()))
+	case s == "linebreaks newline":
 		r.setRows('\n')
-	case s == "rows record":
+	case s == "linebreaks record":
 		r.setRows('\x1e')
-	case strings.HasPrefix(s, "rows "):
-		emitf("nved: rows takes newline or record\n")
+	case strings.HasPrefix(s, "linebreaks "):
+		emitf("nved: linebreaks takes newline or record\n")
 	case s == "csv":
 		r.preset(',', true, true)
 	case s == "tsv":
 		r.preset('\t', true, true)
 	case s == "asv":
-		// The one cross-layer preset: record rows first (a buffer reload), then
-		// the field layer paints unit-delimited columns on top.
+		// The one cross-layer preset: switch to record linebreaks first (a buffer
+		// reload), then the field layer paints unit-delimited columns on top.
 		r.setRows('\x1e')
 		r.preset('\x1f', false, true)
 	case s == "csv off", s == "tsv off", s == "asv off":
 		// Symmetry with the bare presets: if "csv" turns the view on, "csv off"
 		// turns it off, the same as "dsv off". This is the field-layer switch
-		// only — "asv off" leaves the record separator alone (rows newline reverts
-		// that), so off never triggers a surprise buffer reload.
+		// only — "asv off" leaves the record separator alone (linebreaks newline
+		// reverts that), so off never triggers a surprise buffer reload.
 		r.setDelim("off")
 	default:
 		return false
@@ -80,12 +80,12 @@ func (r *repl) preset(delim rune, quotes, headers bool) {
 // record (or, in reverse, explodes it), and a silent reline reads as data loss.
 func (r *repl) setRows(sep rune) {
 	if r.b.sep() == sep {
-		emitf("rows: %s\n", rowsName(sep))
+		emitf("linebreaks: %s\n", rowsName(sep))
 		return
 	}
 	before := len(r.b.lines)
 	r.b.reline(sep)
-	emitf("rows: %s — re-lined %d → %d lines, undo cleared\n", rowsName(sep), before, len(r.b.lines))
+	emitf("linebreaks: %s — re-lined %d → %d lines, undo cleared\n", rowsName(sep), before, len(r.b.lines))
 }
 
 // rowsName is the human name of a record separator for the state report.
@@ -154,14 +154,14 @@ func (r *repl) dsvState() string {
 // rowsClause names the record layer in a field-layer state line, but only when
 // it is non-default. The record separator is otherwise invisible here, yet it is
 // load-bearing — it is what save writes between records — so a buffer left in
-// "rows record" (e.g. after an asv preset, then dsv off) would read as plain text
-// while a save would silently 0x1E-terminate the file. Surfacing it closes that
-// gap; newline rows are the default and add no noise.
+// "linebreaks record" (e.g. after an asv preset, then dsv off) would read as plain
+// text while a save would silently 0x1E-terminate the file. Surfacing it closes
+// that gap; newline linebreaks are the default and add no noise.
 func rowsClause(sep rune) string {
 	if sep == '\n' {
 		return ""
 	}
-	return ", rows record"
+	return ", linebreaks record"
 }
 
 // delimName is the human name of a delimiter rune for the state report: the two

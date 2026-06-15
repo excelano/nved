@@ -53,23 +53,28 @@ pass is done. Slices below are numbered by the original plan; build sequence is
 2 → 3 → 1.
 
 **STATUS 2026-06-14: find (2) and replace (3) SHIPPED as one bundle — v0.8.0.
-Columns (1) SHIPPED — v0.9.0** (command-only, see below). **NEXT: structural ROWS
-→ v0.10.0** (unparked from this design pass — see "Rows" below). v1.0.0 stays the
-hardening milestone.
+Columns (1) SHIPPED — v0.9.0** (then the verb-leading rename + ROWS folded in,
+see below). **Structural ROWS + verb-leading rename SHIPPED — v0.10.0.** v1.0.0
+stays the hardening milestone. NOTE: v0.9.0's `columns insert`/`ci` syntax was
+superseded by v0.10.0's `insert column`/`ic`; only v0.10.0 was promoted to apt
+(0.8.0 → 0.10.0), so the dead `ci`/`ck` syntax never shipped to apt.
 
-1. **Slice 4 — structural columns** (`columns insert` / `columns kill`) —
-   **SHIPPED v0.9.0 2026-06-14.** Addressing crux RESOLVED: **command-only, no
-   chords** (every mnemonic key was taken — Insert is eaten as Copy by VTE, Ctrl+I
-   *is* Tab and would shadow field-nav, Delete/Insert aren't on every keyboard).
-   Columns have no gutter address, so they are named by **1-based position**,
-   surfaced on demand by a faint **top index ruler** (above the header, traces
-   straight down; `columns` / `c` prints it). `columns insert [N]` / `ci [N]` —
-   empty column right of N (bare appends, 0 prepends); `columns kill N` / `ck N` —
-   delete with confirm (names the column when headers on); bare `kill`/`ck` errors
-   (destructive, must name a target). Each op is all-or-nothing across the buffer
-   (a line that won't parse aborts it untouched) with ONE undo entry, and rejoins
-   raw cells verbatim so quoted fields round-trip. Files: columns.go +
-   printRange/printColumns (command.go) + emitRuler/columnRuler (dsv.go).
+1. **Slice 4 — structural columns** — **SHIPPED v0.9.0, RENAMED v0.10.0.**
+   Addressing crux RESOLVED: **command-only, no chords** (every mnemonic key was
+   taken — Insert is eaten as Copy by VTE, Ctrl+I *is* Tab and would shadow
+   field-nav, Delete/Insert aren't on every keyboard). Columns have no gutter
+   address, so they are named by **1-based position**, surfaced on demand by a
+   faint **top index ruler** (above the header, traces straight down; `columns` /
+   `c` prints it). **GRAMMAR (v0.10.0, David's call): the verb LEADS** — `insert
+   column [N]` / `ic [N]` (empty column right of N; bare appends, 0 prepends);
+   `kill column N` / `kc N` (delete with confirm, names the column when headers
+   on; bare errors — destructive, must name a target). Verb-first so the short
+   forms are ic/kc (and ir/kr for rows), whose i/k initials don't blur into the
+   f/r/c verb families the way `ci`/`ri` did. Each op is all-or-nothing across the
+   buffer (a line that won't parse aborts it untouched) with ONE undo entry, and
+   rejoins raw cells verbatim so quoted fields round-trip. Files: structure.go
+   (was columns.go) + printRange/printColumns (command.go) + emitRuler/columnRuler
+   (dsv.go).
 
 2. **Search — `find <regex>`** (short **`f`**) — BUILT 2026-06-14 as a word
    command (rest of line = the pattern, like `head 10`). Go `regexp` (RE2). Chosen
@@ -131,26 +136,31 @@ hardening milestone.
      block-scope line was dropped as inconsistent; additive range-scope possible
      later).
 
-**Rows — structural row editing → v0.10.0 (NEXT, unparked 2026-06-14).** Columns
-exposed a real gap: structural row edits are awkward. Two holes — (a) aligned DSV
-view suppresses Enter-split / row-join (a mid-field split corrupts columns), so a
-record can't be added/removed without `dsv off`; (b) no address-range line delete
-anywhere. A `rows insert`/`rows kill` command fills both, and is the *right*
+**Rows — structural row editing — SHIPPED v0.10.0 (2026-06-14).** Columns exposed
+a real gap: structural row edits were awkward. Two holes — (a) aligned DSV view
+suppresses Enter-split / row-join (a mid-field split corrupts columns), so a record
+couldn't be added/removed without `dsv off`; (b) no address-range line delete
+anywhere. `insert row` / `kill row` fill both, and the row insert is the *right*
 primitive for aligned mode (adds a well-formed empty record, not an unsafe
 mid-field split). NOT mere symmetry with columns — rows are the primary axis and
-already carry gutter addresses, so **no ruler needed**. Plan:
-  - `rows insert [N]` / `ri [N]` — blank record after line N (bare appends, 0
-    prepends). Empty-record SHAPE: match the column count (`,,` for a 3-col file)
-    so it aligns, not a bare one-cell line. (David to confirm.)
-  - `rows kill N` (or `N.M`) / `rk` — delete a line or range. Confirm only for
-    RANGES / multiple, NOT a single line (less destructive than a column kill,
-    which hits every row).
-  - **Rename the record-separator command `rows newline|record` →
+carry gutter addresses, so **no ruler needed**. As shipped:
+  - `insert row [N]` / `ir [N]` — blank record after line N (bare appends, 0
+    prepends). Empty-record SHAPE RESOLVED: in a delimited view it carries one
+    empty field per column (`,,` for a 3-col file) so it aligns and is Tab-able;
+    plain text gets a bare empty line. (My recommendation, built — David can flip.)
+  - `kill row N` (or `N.M`) / `kr` — delete a line or range, reusing parseAddress
+    for the range form. Confirm only for RANGES / multiple, NOT a single line.
+    Killing every line is refused (buffer keeps ≥1). One-step undo restores the
+    removed lines.
+  - bare `rows` reports the line count (state convention); bare `columns`/`c`
+    prints the ruler — both nouns report state.
+  - **Record-separator command RENAMED `rows newline|record` →
     `linebreaks newline|record`** (David's call; `recsep` rejected as wonky, plain
-    complete words preferred). Frees `rows` for structural editing. Breaking change,
-    no alias — nved is 0.x, ~one user, and `rows`-means-separator was always odd.
-  - Open wrinkle: `ri`/`rk` sit beside replace's `r`/`rn`/`ra` (all under "r");
-    mechanically free (no collision), watch for confusion.
+    complete words preferred). Breaking change, no alias — nved is 0.x, ~one user,
+    and `rows`-means-separator was always odd. The `r*` collision worry that drove
+    the verb-leading rename is moot now (shorts are ir/kr, not ri/rk).
+  Files: structure.go (rows funcs + structDispatch) + help/dispatch (command.go) +
+  linebreaks rename (dsv.go).
 
 Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
 still THEORETICAL (never hit in dogfooding); stays backlog as correctness

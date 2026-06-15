@@ -69,7 +69,7 @@ func (r *repl) dispatch(line string) bool {
 	if r.replaceDispatch(s) {
 		return false
 	}
-	if r.columnsDispatch(s) {
+	if r.structDispatch(s) {
 		return false
 	}
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
@@ -308,6 +308,8 @@ EDITING — climb into the printed block to change it
   move         arrows; Ctrl+Left / Ctrl+Right by word (by field when aligned)
   jump         Home / End to line ends; Ctrl+Home / Ctrl+End to buffer ends
   change       type to insert; Enter splits a line; Backspace / Delete join
+  add a row    insert row [N] / ir — blank line after N (bare appends, 0 prepends)
+  kill rows    kill row N / kr — delete line N or an N.M range (a range confirms)
   undo         Ctrl+U — also at the prompt, and across climbing in and out
   leave        Esc, Ctrl+C, or step off the bottom (Down) or the end (Right)
 
@@ -331,17 +333,17 @@ DELIMITED VIEW — opt-in; a file opens as plain text until you ask
   dsv off              back to plain text
   quotes on|off        respect "quoted,fields" when splitting
   headers on|off       pin line 1 as a faint column header
-  rows newline|record  the record separator (record = ASCII 0x1E)
-  csv  tsv  asv        presets; asv = unit fields, record rows (off undoes)
+  linebreaks newline|record  the record separator (record = ASCII 0x1E)
+  csv  tsv  asv        presets; asv = unit fields, record linebreaks (off undoes)
   columns      c       show the faint column-index ruler above the grid
-  columns insert [N]   add an empty column right of N — ci [N]; bare appends,
+  insert column [N]    add an empty column right of N — ic [N]; bare appends,
                        0 prepends
-  columns kill N       delete column N from every row, after a confirm — ck N
+  kill column N        delete column N from every row, after a confirm — kc N
 
-  A bare dsv / quotes / headers / rows / wrap reports its current state.
+  A bare dsv / quotes / headers / linebreaks / wrap reports its current state.
   In an aligned block, Tab / Shift-Tab move field to field and the grid
-  re-aligns as you type. Editing changes the field value only — the
-  delimiter (it is data inside a "quoted" cell), Enter-split, and row joins
-  are suppressed; use dsv off for structural edits.
+  re-aligns as you type. Editing changes the field value only — the delimiter
+  (it is data inside a "quoted" cell) and mid-cell Enter-split are suppressed;
+  use insert / kill row and column for structure, or dsv off.
 `)
 }
