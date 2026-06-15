@@ -1400,6 +1400,10 @@ func TestFindDispatch(t *testing.T) {
 	if !r.findDispatch("find foo") || r.search == nil || r.search.pat != "foo" || r.search.line != 0 || r.last == nil {
 		t.Fatalf("find foo -> search=%+v last=%v", r.search, r.last)
 	}
+	// ...and arms the next prompt so Enter steps without retyping.
+	if r.pendingLine != "find next" {
+		t.Errorf("find should arm pendingLine, got %q", r.pendingLine)
+	}
 	// next steps to the following match...
 	r.findDispatch("find next")
 	if r.search.line != 2 {

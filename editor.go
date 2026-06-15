@@ -113,7 +113,7 @@ const (
 // reuses the width printLines drew the block at (r.termW) rather than re-reading
 // it, so the editor's layout matches what is already on screen. On return r.last
 // reflects the block's (possibly changed) size.
-func (r *repl) edit(climb key) editAction {
+func (r *repl) edit(climb key, toMatch bool) editAction {
 	e := &editor{r: r, start: r.last.start, count: r.last.count}
 	e.aligned = r.lastAligned
 	if e.aligned {
@@ -127,6 +127,16 @@ func (r *repl) edit(climb key) editAction {
 		e.cy, e.cx = 0, 0 // Ctrl+Home: first line
 	default: // keyUp
 		e.cy, e.cx = e.count-1, 0 // bottom line
+	}
+
+	// Climb-on-highlight: when this climb came off the armed `find next` seed and
+	// the match sits in the block, land the cursor on the match instead of the
+	// climbed edge — find then edit is one motion. Guarded by toMatch so an
+	// ordinary climb never jumps to a stale search match.
+	if toMatch && r.search != nil {
+		if ml := r.search.line + 1; ml >= e.start && ml <= e.start+e.count-1 {
+			e.cy, e.cx = ml-e.start, clamp(r.search.lo, 0, e.lineLen(ml-e.start))
+		}
 	}
 
 	// Clear the prompt we're climbing out of and take over wrapping. The prompt

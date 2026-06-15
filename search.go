@@ -87,6 +87,7 @@ func (r *repl) startFind(pat string) {
 	}
 	r.search = &searchState{re: re, pat: pat, line: line, lo: lo, hi: hi}
 	r.showMatch()
+	r.pendingLine = "find next" // arm the next prompt to step from here
 }
 
 // findNext steps to the match after the current one, wrapping to the top of the
@@ -118,6 +119,7 @@ func (r *repl) findNext() {
 		emit(faint("find: wrapped to top") + "\n")
 	}
 	r.showMatch()
+	r.pendingLine = "find next"
 }
 
 // reportSearch is the bare-verb state line: the active pattern, or that there is

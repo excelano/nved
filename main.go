@@ -60,6 +60,12 @@ type repl struct {
 	// commands so `find next` can step from the current match and the print path
 	// can highlight it; see search.go.
 	search *searchState
+
+	// pendingLine pre-fills the next command prompt, the throwaway armed-`next`
+	// seed: after a find lands a match it is set to "find next", so the next prompt
+	// reads "find next" with the cursor after it and Enter steps to the following
+	// match. The chord seeds it too. Consumed (cleared) the moment it is echoed.
+	pendingLine string
 }
 
 // block records a printed range so a later climb knows where on screen the
@@ -71,9 +77,10 @@ type block struct {
 
 // cmdResult is what one trip through readCommand produces.
 type cmdResult struct {
-	kind  cmdKind
-	line  string // the typed command, when kind == cmdSubmit
-	climb key    // the key that triggered a climb, when kind == cmdClimb
+	kind    cmdKind
+	line    string // the typed command, when kind == cmdSubmit
+	climb   key    // the key that triggered a climb, when kind == cmdClimb
+	toMatch bool   // the climb came off an armed search seed: land on the match
 }
 
 type cmdKind int
@@ -199,7 +206,7 @@ func (r *repl) run() {
 		case cmdQuit:
 			return
 		case cmdClimb:
-			switch r.edit(res.climb) {
+			switch r.edit(res.climb, res.toMatch) {
 			case actPageUp:
 				r.pageUp()
 			case actPageDown:
@@ -238,6 +245,22 @@ func (r *repl) run() {
 // with text typed it is swallowed so a half-written command is not lost.
 func (r *repl) readCommand() cmdResult {
 	var line []rune
+	// armed marks the line as the throwaway "<verb> next" search seed, pre-filled
+	// from pendingLine and not yet touched. While armed a navigation key acts as if
+	// the line were empty — a climb lands on the highlighted match (toMatch) and
+	// paging scrolls — since the seed is UI, not a half-typed command. The first
+	// edit (a rune or backspace) demotes it to ordinary typed text.
+	armed := false
+	if r.pendingLine != "" {
+		line = []rune(r.pendingLine)
+		out(string(line))
+		r.pendingLine = ""
+		armed = true
+	}
+	// nav reports whether a climb/page should fire now: an empty line, or the
+	// untouched armed seed.
+	nav := func() bool { return len(line) == 0 || armed }
+	climbable := func() bool { return r.last != nil && (r.delim == 0 || r.lastAligned) }
 	for {
 		k, ok := r.rd.readKey()
 		if !ok {
@@ -254,11 +277,23 @@ func (r *repl) readCommand() cmdResult {
 		case keyCtrlX:
 			out("\r\n")
 			return cmdResult{kind: cmdSubmit, line: "x"}
+		case keyCtrlF:
+			// Seed a fresh search: replace whatever is on the line with "find ", ready
+			// for the pattern. Ctrl+F always starts over, so it works mid-line too.
+			out("\r" + csiEL + prompt + "find ")
+			line = []rune("find ")
+			armed = false
 		case keyCtrlU:
 			if len(line) == 0 {
 				out("\r\n")
 				return cmdResult{kind: cmdUndo}
 			}
+		case keyEsc:
+			// Clear the command line back to a bare prompt — the design's way out of
+			// the armed seed (Backspace, held, gets there too).
+			out("\r" + csiEL + prompt)
+			line = nil
+			armed = false
 		case keyEnter:
 			out("\r\n")
 			return cmdResult{kind: cmdSubmit, line: string(line)}
@@ -266,31 +301,34 @@ func (r *repl) readCommand() cmdResult {
 			if len(line) > 0 {
 				line = line[:len(line)-1]
 				out("\b \b")
+				armed = false
 			}
 		case keyRune:
 			line = append(line, k.r)
 			out(string(k.r))
+			armed = false
 		case keyUp, keyLeft:
 			// Climb into the block to edit it: plain text always, or an aligned DSV
 			// block (the editor reproduces the aligned geometry). A delimiter set on
 			// an un-alignable block — a multi-line quoted field shown raw — stays
 			// read-only, since the on-screen raw view isn't what the editor draws.
-			if len(line) == 0 && r.last != nil && (r.delim == 0 || r.lastAligned) {
-				return cmdResult{kind: cmdClimb, climb: k}
+			// Off an armed seed the climb lands on the search match (toMatch).
+			if nav() && climbable() {
+				return cmdResult{kind: cmdClimb, climb: k, toMatch: armed}
 			}
 		case keyHome:
-			if k.ctrl && len(line) == 0 && r.last != nil && (r.delim == 0 || r.lastAligned) {
-				return cmdResult{kind: cmdClimb, climb: k}
+			if k.ctrl && nav() && climbable() {
+				return cmdResult{kind: cmdClimb, climb: k, toMatch: armed}
 			}
 		case keyPageUp:
 			// Only page when there is a line above the block to bring on screen;
 			// otherwise swallow the key in place, like the other nav keys, so the
 			// prompt line isn't disturbed.
-			if len(line) == 0 && r.last != nil && r.last.start > 1 {
+			if nav() && r.last != nil && r.last.start > 1 {
 				return cmdResult{kind: cmdPageUp}
 			}
 		case keyPageDown:
-			if len(line) == 0 && r.last != nil && r.last.start+r.last.count <= len(r.b.lines) {
+			if nav() && r.last != nil && r.last.start+r.last.count <= len(r.b.lines) {
 				return cmdResult{kind: cmdPageDown}
 			}
 		}
