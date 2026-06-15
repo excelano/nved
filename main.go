@@ -55,6 +55,11 @@ type repl struct {
 	// quoted field shown raw) stays read-only rather than climbing into a view
 	// whose geometry the editor can't reproduce.
 	lastAligned bool
+
+	// search is the armed find/replace, nil when none. It survives between
+	// commands so `find next` can step from the current match and the print path
+	// can highlight it; see search.go.
+	search *searchState
 }
 
 // block records a printed range so a later climb knows where on screen the

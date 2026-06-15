@@ -63,6 +63,9 @@ func (r *repl) dispatch(line string) bool {
 	if r.dsvDispatch(s) {
 		return false
 	}
+	if r.findDispatch(s) {
+		return false
+	}
 	if start, end, ok := parseAddress(s, len(b.lines)); ok {
 		r.printLines(start, end)
 	} else {

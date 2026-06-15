@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -1349,5 +1350,111 @@ func TestExitAliases(t *testing.T) {
 	}
 	if !r.dispatch("exit") {
 		t.Fatal("second exit on a dirty buffer should discard and quit")
+	}
+}
+
+func TestSearchForward(t *testing.T) {
+	lines := []string{"alpha beta", "gamma", "beta gamma"}
+	re := regexp.MustCompile("beta")
+
+	// First match anywhere, scanning from the top.
+	line, lo, hi, wrapped, ok := searchForward(lines, re, 0, 0)
+	if !ok || line != 0 || lo != 6 || hi != 10 || wrapped {
+		t.Fatalf("first = (%d,%d,%d,wrapped=%v,ok=%v), want (0,6,10,false,true)", line, lo, hi, wrapped, ok)
+	}
+
+	// Next from just past it: nothing more on line 0, so it lands on line 2.
+	line, lo, hi, wrapped, ok = searchForward(lines, re, 0, 10)
+	if !ok || line != 2 || lo != 0 || hi != 4 || wrapped {
+		t.Fatalf("second = (%d,%d,%d,wrapped=%v), want (2,0,4,false)", line, lo, hi, wrapped)
+	}
+
+	// Next from past the last match wraps to the top and flags it.
+	line, lo, hi, wrapped, ok = searchForward(lines, re, 2, 4)
+	if !ok || line != 0 || lo != 6 || !wrapped {
+		t.Fatalf("wrap = (%d,%d,%d,wrapped=%v), want (0,6,_,true)", line, lo, hi, wrapped)
+	}
+
+	// No match at all.
+	if _, _, _, _, ok := searchForward(lines, regexp.MustCompile("zzz"), 0, 0); ok {
+		t.Error("zzz should not match")
+	}
+}
+
+func TestSearchForwardUnicode(t *testing.T) {
+	// Multibyte runes before the match: the returned range must be rune indices,
+	// not byte offsets, so the cursor and highlight land on the right characters.
+	lines := []string{"Þórðarson xy"}
+	line, lo, hi, _, ok := searchForward(lines, regexp.MustCompile("xy"), 0, 0)
+	if !ok || line != 0 || lo != 10 || hi != 12 {
+		t.Fatalf("unicode = (%d,%d,%d), want (0,10,12)", line, lo, hi)
+	}
+}
+
+func TestFindDispatch(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"foo", "bar", "foo baz"}, 80, 24)
+
+	// A pattern starts a search, records it, and prints a climbable block.
+	if !r.findDispatch("find foo") || r.search == nil || r.search.pat != "foo" || r.search.line != 0 || r.last == nil {
+		t.Fatalf("find foo -> search=%+v last=%v", r.search, r.last)
+	}
+	// next steps to the following match...
+	r.findDispatch("find next")
+	if r.search.line != 2 {
+		t.Fatalf("find next -> line %d, want 2", r.search.line)
+	}
+	// ...and wraps back to the top.
+	r.findDispatch("f next")
+	if r.search.line != 0 {
+		t.Fatalf("f next (wrap) -> line %d, want 0", r.search.line)
+	}
+
+	// A bare verb reports state and clears the block but keeps the search.
+	r.findDispatch("find")
+	if r.search == nil || r.last != nil {
+		t.Errorf("bare find -> search=%v last=%v, want search kept, last cleared", r.search, r.last)
+	}
+
+	// No match disarms the search and clears the block.
+	r.findDispatch("find nomatchxyz")
+	if r.search != nil || r.last != nil {
+		t.Errorf("no match -> search=%v last=%v, want both nil", r.search, r.last)
+	}
+
+	// A bad pattern is a matched-but-rejected command.
+	if !r.findDispatch("find [") {
+		t.Error("a bad pattern should still be a matched find command")
+	}
+
+	// next with nothing armed is handled, not a fall-through.
+	r.search = nil
+	if !r.findDispatch("find next") {
+		t.Error("find next with no search should still match")
+	}
+
+	// Non-find input falls through to address parsing.
+	for _, s := range []string{"format", "5.10", "fo", "5"} {
+		if r.findDispatch(s) {
+			t.Errorf("%q should not match findDispatch", s)
+		}
+	}
+}
+
+func TestFindPrintsMatchBlock(t *testing.T) {
+	var buf strings.Builder
+	old := screen
+	screen = &buf
+	t.Cleanup(func() { screen = old })
+	r := newRepl([]string{"one", "two", "needle here", "four"}, 80, 24)
+	r.findDispatch("find needle")
+	out := buf.String()
+	if !strings.Contains(out, "needle here") {
+		t.Errorf("find should print the matching line, got %q", out)
+	}
+	// The match block leads with the match line, so it is climbable from the top.
+	if r.last == nil || r.last.start != 3 {
+		t.Errorf("match block should start at line 3, got %v", r.last)
 	}
 }
