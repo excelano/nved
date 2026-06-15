@@ -45,7 +45,12 @@ Pending: dogfood, then tag v0.7.1.
 
 **v1 roadmap — decided 2026-06-14 (post-dogfood).** Round-out is **C, locked**:
 edit the printed block, reprint to edit elsewhere; no roaming viewport. David:
-"C is still perfect." Build order, all independent, sequenced by size/headspace:
+"C is still perfect." **Build order REORDERED 2026-06-14: find → replace →
+columns.** Find/replace are fully designed and have the internal dependency chain
+(replace reuses find's highlight + armed-state + chord infra); columns is
+independent but still has an open addressing crux, so it follows once that design
+pass is done. Slices below are numbered by the original plan; build sequence is
+2 → 3 → 1.
 
 1. **Slice 4 — structural columns** (`col add` / `col del`). UNPARKED — David was
    reaching for it dogfooding wide CSVs. Confirm-on-delete already decided.
@@ -58,12 +63,12 @@ edit the printed block, reprint to edit elsewhere; no roaming viewport. David:
    (`col add`/`col del` vs Ctrl+Insert/Ctrl+Delete) rides on this choice.
 
 2. **Search — `find <regex>`** (short **`f`**) — LOCKED 2026-06-14 as a word
-   command (rest of line = the pattern, like `head 10`). Prints the matching line
-   to climb into — fits C (dial in by content). Go `regexp` (RE2). Chosen OVER a
-   `/regex/` slash-address: word+letter matches nved's verb shape (save/s, exit/x,
-   find/f). **Find-next spelling deferred to post-compact** — bare `find`/`f` =
-   repeat-search is the obvious idiom but collides with the bare-reports-state
-   convention ([[feedback_bare_command_reports_state]]); unresolved.
+   command (rest of line = the pattern, like `head 10`). Go `regexp` (RE2). Chosen
+   OVER a `/regex/` slash-address: word+letter matches nved's verb shape (save/s,
+   exit/x, find/f). **Find-next spelling RESOLVED 2026-06-14: it is a literal
+   `find next` / `f next` subcommand** — the interaction model (below) leaves that
+   exact string sitting in the command line, so "next" is just a typed word, no
+   collision with bare-reports-state (bare `find`/`f` still REPORTS state).
 
 3. **Substitution — `replace /old/new/g`** (short **`r`**) — LOCKED 2026-06-14.
    Verb is NOT `s` (taken by save; ed only gets away with `s` because its save is
@@ -72,12 +77,39 @@ edit the printed block, reprint to edit elsewhere; no roaming viewport. David:
    accepted** (`r /…/` and `r/…/` both parse — skip optional ws after the verb,
    next char = delim). **Guard: delimiter must be non-alphanumeric** — the sane
    reading of "any delimiter" that kills the no-space word-form footgun (`replaced`
-   → `d`-delimited) and the `rows`/`r` ambiguity. **Scope: the printed block**, not
-   ed address-prefixed commands — dial in with `10.20`, then `replace /foo/bar/`
-   acts within it and reprints. RE2; one undo entry per run. **Help and docs use
-   `/` as the delimiter in examples** (David's call) even though any non-alnum
-   char works. `f`/`r` collide with
-   ed's `f`=filename / `r`=read (nved uses neither; spent-symbol note, accepted).
+   → `d`-delimited) and the `rows`/`r` ambiguity. RE2; one undo entry per run.
+   **Help and docs use `/` as the delimiter in examples** (David's call) even though
+   any non-alnum char works. `f`/`r` collide with ed's `f`=filename / `r`=read (nved
+   uses neither; spent-symbol note, accepted).
+
+   **Shared interaction model — LOCKED 2026-06-14 (find + replace are twins):**
+   - **Chords seed the command line.** `Ctrl+f` inserts `find ` at the prompt;
+     `Ctrl+r` inserts `replace `. User types the pattern and hits Enter. **v1 is
+     prompt-only**; chords firing while climbed in is the eventual target (drop to
+     the prompt first) but deferred.
+   - **Enter highlights, cursor stays put.** On Enter, the match is highlighted in
+     the already-printed block (reverse-video reprint) but the cursor STAYS in the
+     command line, which is rewritten to the armed `find next` / `replace next`.
+     Enter again steps. Both are real typeable subcommands, not magic.
+   - **`next` is buffer-wide.** Walks the whole buffer, reprinting the block around
+     each match when it runs off the visible screenful; wraps at the end with a
+     one-line "wrapped to top" notice. (This folds in the old search-addressing
+     item — find IS navigation now.)
+   - **Climb lands on the highlight.** A climb key (Up / Left) from the armed state
+     jumps the cursor straight onto the highlighted match — the find→edit handoff,
+     so dialing in by content and editing it is one motion, not two.
+   - **replace is preview-first (confirm-each).** Enter on `replace /old/new/`
+     highlights the first OLD match UNCHANGED (nothing written yet). `replace next`
+     replaces the highlighted match and advances the highlight to the next OLD
+     match. `replaced N` when exhausted. **`/g` is the escape hatch: replace ALL in
+     scope at once, no stepping.** Safer default — you see before you change.
+   - **Backspace is NOT overloaded** (David's call): it deletes one char at a time,
+     same as always — the user clears the armed line by holding Backspace, or with
+     one **Esc**.
+   - **Zero matches** → report "no match" and do NOT arm `next`.
+   - **Scope** for the non-`/g` block form of replace: the printed block (dial in
+     with `10.20`, then `replace /foo/bar/` acts within it and reprints). `next`
+     and `/g`-wide are the buffer-spanning forms.
 
 Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
 still THEORETICAL (never hit in dogfooding); stays backlog as correctness
@@ -213,8 +245,9 @@ widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
   SIGWINCH.
 - **SIGWINCH** — mid-edit resize (size is currently refreshed only at
   print/climb).
-- **Search addressing (`/text/`)** — jump to the line matching a pattern and
-  climb in; "find by content, not by counting." Go `regexp`. Mirrors the same
-  gap in ved (which has the BRE engine but deferred the address hook).
+- **Search addressing (`/text/`)** — FOLDED INTO v1 `find` (2026-06-14): the
+  buffer-wide `find next` walk + climb-on-highlight handoff IS "find by content,
+  not by counting." Kept here only as the lineage note; ved still has the same
+  open gap (BRE engine present, address hook deferred).
 - **v1.0 hardening** — SECURITY.md, Dependabot, CodeQL (deferred from the initial
   releases).
