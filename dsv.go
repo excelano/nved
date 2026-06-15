@@ -493,8 +493,10 @@ func (r *repl) printBlockAligned(start, end int) bool {
 
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	if showSticky {
+		// The pinned header is a reference copy of line 1, not the live match
+		// location, so it carries no highlight.
 		text, sep := alignRow(headerFields, colW, r.delim)
-		emitWindowedRow(w, 1, 0, avail, text, sep, true)
+		emitWindowedRow(w, 1, 0, avail, text, sep, true, 0, 0)
 	}
 	for k, fields := range rows {
 		num := start + k
@@ -502,7 +504,17 @@ func (r *repl) printBlockAligned(start, end int) bool {
 		// top of the block (start == 1) or pinned above it, so it reads the same way.
 		dim := r.headers && num == 1
 		text, sep := alignRow(fields, colW, r.delim)
-		emitWindowedRow(w, num, 0, avail, text, sep, dim)
+		// Highlight the match on this line, mapping its raw rune range onto the
+		// aligned grid the same way the cursor is mapped (alignedVisualCol), so the
+		// reverse-video span sits under the very characters that matched.
+		hlLo, hlHi := 0, 0
+		if lo, hi, ok := r.matchRange(num); ok {
+			spans, _ := fieldSpans(r.b.lines[num-1], r.delim, r.quotes)
+			gw := gapWidth(r.delim)
+			hlLo = alignedVisualCol(spans, colW, gw, lo)
+			hlHi = alignedVisualCol(spans, colW, gw, hi)
+		}
+		emitWindowedRow(w, num, 0, avail, text, sep, dim, hlLo, hlHi)
 	}
 	return true
 }
@@ -515,19 +527,26 @@ func (r *repl) printBlockAligned(start, end int) bool {
 // A dim row (the column header) is drawn entirely faint — number, text, and markers;
 // an ordinary row is faint only in its gutter, separator delimiters, and markers,
 // like every other printed line.
-func emitWindowedRow(w, num, hscroll, avail int, display string, sep []bool, dim bool) {
+// hlLo/hlHi mark a display-column range (rune indices into display) to draw in
+// reverse video — the search match on this row — or an empty range for none. The
+// window clips it like any other content: only the visible slice is reversed.
+func emitWindowedRow(w, num, hscroll, avail int, display string, sep []bool, dim bool, hlLo, hlHi int) {
 	rs := []rune(display)
 	left, lo, hi, right := window(len(rs), hscroll, avail)
 	// A dim row is faint as a whole, so its separators need no per-rune faint; an
 	// ordinary row faints only its separator delimiters (and gutter and markers).
-	// sep is nil for the raw wrap-off view, where no rune is a separator.
+	// sep is nil for the raw wrap-off view, where no rune is a separator. A matched
+	// rune is additionally drawn reversed, the highlight layered over the faint.
 	var body strings.Builder
 	for i := lo; i < hi; i++ {
+		piece := string(rs[i])
 		if i < len(sep) && sep[i] && !dim {
-			body.WriteString(faint(string(rs[i])))
-		} else {
-			body.WriteRune(rs[i])
+			piece = faint(piece)
 		}
+		if hlLo <= i && i < hlHi {
+			piece = reverse(piece)
+		}
+		body.WriteString(piece)
 	}
 	if dim {
 		row := fmt.Sprintf("%*d  ", w, num)

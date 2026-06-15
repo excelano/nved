@@ -17,6 +17,31 @@ const tabWidth = 8
 // cue rather than a colour one, so it survives mild colour-blindness.
 func faint(s string) string { return "\x1b[2m" + s + "\x1b[22m" }
 
+// reverse wraps s in the SGR reverse-video attribute (ESC[7m … ESC[27m). The
+// search match is drawn reversed — foreground and background swapped — a
+// contrast cue rather than a colour one, the same colour-blind-safe principle as
+// the faint gutter.
+func reverse(s string) string { return "\x1b[7m" + s + "\x1b[27m" }
+
+// highlightRange renders runes, wrapping those whose absolute display index
+// (off + position) falls in the range [hlLo, hlHi) in reverse video — the
+// search-match highlight. With an empty range (hlLo >= hlHi) it is a plain string
+// conversion, the no-match-on-this-row path.
+func highlightRange(runes []rune, off, hlLo, hlHi int) string {
+	if hlLo >= hlHi {
+		return string(runes)
+	}
+	var b strings.Builder
+	for j, r := range runes {
+		if idx := off + j; hlLo <= idx && idx < hlHi {
+			b.WriteString(reverse(string(r)))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // gutterPrefix is the first-row prefix: the right-aligned, faint line number and
 // two spaces. Its visible width is w+2; the SGR codes occupy no columns.
 func gutterPrefix(w, num int) string { return faint(fmt.Sprintf("%*d", w, num)) + "  " }

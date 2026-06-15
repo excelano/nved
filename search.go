@@ -146,6 +146,16 @@ func (r *repl) showMatch() {
 	r.printLines(ml, len(r.b.lines))
 }
 
+// matchRange reports the active match's rune range [lo,hi) when it falls on
+// 1-based buffer line num, the signal for the print path to highlight it. ok is
+// false with no search armed or the match on another line, the no-highlight case.
+func (r *repl) matchRange(num int) (lo, hi int, ok bool) {
+	if r.search == nil || r.search.line != num-1 {
+		return 0, 0, false
+	}
+	return r.search.lo, r.search.hi, true
+}
+
 // searchForward scans the buffer for the next match of re at or after
 // (fromLine, fromRune), wrapping past the last line back to the top so every line
 // is visited once. It returns the match's 0-based line and rune range [lo,hi)

@@ -1102,7 +1102,7 @@ func TestEmitWindowedRowShowsFaintDelim(t *testing.T) {
 	screen = &buf
 	t.Cleanup(func() { screen = old })
 	text, sep := alignRow([]string{"a", "b"}, []int{1, 1}, ',')
-	emitWindowedRow(1, 1, 0, 40, text, sep, false)
+	emitWindowedRow(1, 1, 0, 40, text, sep, false, 0, 0)
 	if got := buf.String(); !strings.Contains(got, faint(",")) {
 		t.Errorf("rendered row should contain a faint comma, got %q", got)
 	}
@@ -1115,7 +1115,7 @@ func TestEmitWindowedRowRawNilMask(t *testing.T) {
 	old := screen
 	screen = &buf
 	t.Cleanup(func() { screen = old })
-	emitWindowedRow(1, 1, 0, 40, "hello world", nil, false)
+	emitWindowedRow(1, 1, 0, 40, "hello world", nil, false, 0, 0)
 	if got := buf.String(); !strings.Contains(got, "hello world") {
 		t.Errorf("rendered row should contain the plain text, got %q", got)
 	}
@@ -1449,12 +1449,48 @@ func TestFindPrintsMatchBlock(t *testing.T) {
 	t.Cleanup(func() { screen = old })
 	r := newRepl([]string{"one", "two", "needle here", "four"}, 80, 24)
 	r.findDispatch("find needle")
-	out := buf.String()
+	// Strip SGR so the highlight (which splits the match into per-rune reverse
+	// spans) doesn't hide the logical line content from the contains check.
+	out := regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`).ReplaceAllString(buf.String(), "")
 	if !strings.Contains(out, "needle here") {
 		t.Errorf("find should print the matching line, got %q", out)
 	}
 	// The match block leads with the match line, so it is climbable from the top.
 	if r.last == nil || r.last.start != 3 {
 		t.Errorf("match block should start at line 3, got %v", r.last)
+	}
+}
+
+func TestFindHighlightsMatch(t *testing.T) {
+	var buf strings.Builder
+	old := screen
+	screen = &buf
+	t.Cleanup(func() { screen = old })
+
+	// Raw text: the matched substring is drawn reversed, the rest is not.
+	r := newRepl([]string{"the needle is here"}, 80, 24)
+	r.findDispatch("find needle")
+	if got := buf.String(); !strings.Contains(got, reverse("n")) {
+		t.Errorf("raw match should be reverse-video, got %q", got)
+	}
+
+	// Multibyte runes before the match: the highlight lands on the match, not
+	// shifted by the extra bytes — visualCol maps runes, not bytes.
+	buf.Reset()
+	r = newRepl([]string{"Þórð xy"}, 80, 24)
+	r.findDispatch("find xy")
+	got := buf.String()
+	if !strings.Contains(got, reverse("x")) || strings.Contains(got, reverse("Þ")) {
+		t.Errorf("unicode highlight misaligned, got %q", got)
+	}
+
+	// Aligned DSV: a cell value matched inside the grid is highlighted on the
+	// aligned row, mapped through alignedVisualCol.
+	buf.Reset()
+	r = newRepl([]string{"id,city", "1,Brussels"}, 80, 24)
+	r.dsvDispatch("csv")
+	r.findDispatch("find Brussels")
+	if got := buf.String(); !strings.Contains(got, reverse("B")) {
+		t.Errorf("aligned match should be highlighted, got %q", got)
 	}
 }

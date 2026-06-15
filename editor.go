@@ -844,7 +844,11 @@ func (e *editor) paintHeader(text string) {
 // line-number gutter, continuation rows the arrow marker; the
 // text is word-wrapped to A columns by the same wrapRows the cursor math uses,
 // so the row count always equals physHeightOf.
-func emitLine(w, num int, text string, A int) {
+// hlLo/hlHi mark a display-column range to draw in reverse video — the search
+// match on this line, in tab-expanded coordinates — or an empty range when this
+// line holds no match. The highlight survives wrapping: each physical row picks
+// out the slice of the range that falls on it.
+func emitLine(w, num int, text string, A, hlLo, hlHi int) {
 	disp := []rune(expandTabs(text))
 	starts := wrapRows(disp, A)
 	for r, s := range starts {
@@ -856,7 +860,7 @@ func emitLine(w, num int, text string, A int) {
 		if r == 0 {
 			prefix = gutterPrefix(w, num)
 		}
-		out("\r" + csiEL + prefix + string(disp[s:end]) + "\r\n")
+		out("\r" + csiEL + prefix + highlightRange(disp[s:end], s, hlLo, hlHi) + "\r\n")
 	}
 }
 
@@ -913,7 +917,8 @@ func (e *editor) repaintAll(prePhysRow int) {
 func (e *editor) emitAligned(num int, text string) {
 	dim := e.r.headers && num == 1
 	aligned, sep := alignRow(e.alignedCells(text), e.colW, e.r.delim)
-	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), aligned, sep, dim)
+	// No search highlight while editing: once climbed in, the cursor is the locus.
+	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), aligned, sep, dim, 0, 0)
 }
 
 // emitRaw prints one raw (non-DSV) buffer line for the editor: word-wrapped onto
@@ -923,10 +928,10 @@ func (e *editor) emitAligned(num int, text string) {
 // draw faint.
 func (e *editor) emitRaw(num int, text string) {
 	if e.r.wrap {
-		emitLine(e.width(), num, text, e.availWidth())
+		emitLine(e.width(), num, text, e.availWidth(), 0, 0)
 		return
 	}
-	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), expandTabs(text), nil, false)
+	emitWindowedRow(e.width(), num, e.hscroll, e.availWidth(), expandTabs(text), nil, false, 0, 0)
 }
 
 // --- rune-slice surgery ----------------------------------------------------

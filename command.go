@@ -232,13 +232,22 @@ func (r *repl) printBlockRaw(start, end int) {
 	a := r.textWidth()
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	for i := start; i <= end; i++ {
+		text := r.b.lines[i-1]
+		// Highlight the search match on this line, converting its raw rune range to
+		// display columns the way visualCol lays text out (tabs expanded) — the same
+		// mapping the cursor uses, so highlight and cursor agree. Both wrap and
+		// wrap-off measure in those display columns.
+		hlLo, hlHi := 0, 0
+		if lo, hi, ok := r.matchRange(i); ok {
+			hlLo, hlHi = visualCol(text, lo), visualCol(text, hi)
+		}
 		if r.wrap {
-			emitLine(w, i, r.b.lines[i-1], a)
+			emitLine(w, i, text, a, hlLo, hlHi)
 		} else {
 			// wrap off: one row per line, windowed at the left edge (the command-line
 			// print never pans — only a climbed-in cursor does), with a faint › where
 			// the line runs past the right edge.
-			emitWindowedRow(w, i, 0, a, expandTabs(r.b.lines[i-1]), nil, false)
+			emitWindowedRow(w, i, 0, a, expandTabs(text), nil, false, hlLo, hlHi)
 		}
 	}
 }
