@@ -209,14 +209,22 @@ func (e *editor) loop() editAction {
 				return actNone // right past the last character leaves, mirroring Left entering there
 			}
 		case keyUp:
-			if e.cy > 0 {
+			switch {
+			case e.cy == 0:
+				// at the top row Up stays put, the mirror of Down leaving past the bottom
+			case e.aligned:
+				e.moveVertAligned(e.cy - 1)
+			default:
 				e.moveTo(e.cy-1, e.cx)
 			}
 		case keyDown:
-			if e.cy < e.count-1 {
-				e.moveTo(e.cy+1, e.cx)
-			} else {
+			switch {
+			case e.cy >= e.count-1:
 				return actNone // down past the last line leaves, mirroring Up entering there
+			case e.aligned:
+				e.moveVertAligned(e.cy + 1)
+			default:
+				e.moveTo(e.cy+1, e.cx)
 			}
 		case keyPageUp:
 			// Leave and page up, but only when there's a line above the block to
@@ -553,6 +561,29 @@ func (e *editor) cellLeft() {
 	case e.cy > 0:
 		e.moveTo(e.cy-1, e.lineLen(e.cy-1))
 	}
+}
+
+// moveVertAligned is Up/Down in the aligned DSV view: it moves to logical line ty
+// keeping the cursor in the same column (field) at the same offset within that
+// cell, rather than at the same raw rune index. Raw offsets don't line up between
+// rows — padding is display-only and an empty cell shifts every later field — so
+// preserving the raw index drops the cursor into a neighbouring cell. The offset
+// clamps to the target cell, and the field clamps to the target's last field when
+// it is shorter, so a step into a ragged or empty row still lands sensibly.
+func (e *editor) moveVertAligned(ty int) {
+	spans := e.alignedSpans(e.curLine())
+	f := fieldOf(spans, e.cx)
+	off := e.cx - spans[f].rawStart
+
+	dst := e.alignedSpans(e.lineText(ty))
+	if f >= len(dst) {
+		f = len(dst) - 1
+	}
+	s := dst[f]
+	if cell := s.rawEnd - s.rawStart; off > cell {
+		off = cell
+	}
+	e.moveTo(ty, s.rawStart+off)
 }
 
 // prevWordStart returns the index of the start of the word at or before i: it

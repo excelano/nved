@@ -813,6 +813,42 @@ func TestAlignedCellNav(t *testing.T) {
 	}
 }
 
+func TestMoveVertAlignedKeepsColumn(t *testing.T) {
+	col := func(e *editor) int { return fieldOf(e.alignedSpans(e.curLine()), e.cx) }
+
+	// Rows whose raw field widths differ: preserving the raw rune index would drop
+	// the cursor into a neighbouring cell. Down from field 2 of a short row must
+	// stay in field 2 of the wide row, not skid back to field 0 at raw index 4.
+	e := newAlignedEditor(t, []string{"x,y,z", "aaaaaa,bbbbbb,cccccc"}, ',', false, false, 0, 4)
+	e.moveVertAligned(1)
+	if c := col(e); c != 2 {
+		t.Errorf("down into wide row: landed in field %d (cx=%d), want 2", c, e.cx)
+	}
+
+	// Moving up INTO a row whose middle field is empty must land in that empty cell.
+	e2 := newAlignedEditor(t, []string{"a,,ccc", "bb,dd,ee"}, ',', false, false, 1, 3) // field 1 ("dd")
+	e2.moveVertAligned(0)
+	if c := col(e2); c != 1 || e2.cx != 2 {
+		t.Errorf("up into empty cell: field %d cx=%d, want field 1 cx=2", c, e2.cx)
+	}
+
+	// Moving OUT of an empty cell: raw index 2 would land in field 0 of the wider
+	// row below; the fix keeps the column at field 1.
+	e3 := newAlignedEditor(t, []string{"a,,ccc", "bb,dd,ee"}, ',', false, false, 0, 2) // empty field 1
+	e3.moveVertAligned(1)
+	if c := col(e3); c != 1 {
+		t.Errorf("down out of empty cell: landed in field %d (cx=%d), want 1", c, e3.cx)
+	}
+
+	// The intra-cell offset clamps to a shorter target cell: offset 4 inside a wide
+	// field 0 lands at the end of the one-rune field 0 above, still in field 0.
+	e4 := newAlignedEditor(t, []string{"x,y,z", "aaaaaa,bbbbbb,cccccc"}, ',', false, false, 1, 4)
+	e4.moveVertAligned(0)
+	if c := col(e4); c != 0 || e4.cx != 1 {
+		t.Errorf("up with offset clamp: field %d cx=%d, want field 0 cx=1", c, e4.cx)
+	}
+}
+
 func TestAlignedHorizontalPan(t *testing.T) {
 	e := newAlignedEditor(t, []string{"aaaa,bbbb,cccc,dddd,eeee"}, ',', false, false, 0, 0)
 	e.r.termW = 16 // gutter 1 + 2 spaces -> 13 columns of text
