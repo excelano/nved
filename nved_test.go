@@ -1691,8 +1691,8 @@ func TestInsertColumnCells(t *testing.T) {
 		p    int
 		want []string
 	}{
-		{0, []string{"", "a", "b", "c"}}, // prepend
-		{1, []string{"a", "", "b", "c"}}, // right of column 1
+		{0, []string{"", "a", "b", "c"}}, // before A (prepend)
+		{1, []string{"a", "", "b", "c"}}, // before B
 		{3, []string{"a", "b", "c", ""}}, // at the end
 		{9, []string{"a", "b", "c", ""}}, // past the end clamps to append
 		{-1, []string{"", "a", "b", "c"}},
@@ -1731,12 +1731,12 @@ func newColRepl(t *testing.T, lines []string) *repl {
 
 func TestColumnsInsert(t *testing.T) {
 	r := newColRepl(t, []string{"name,age", "alice,30", "bob,7"})
-	if !r.structDispatch("ic 1") { // right of column 1
-		t.Fatal("ic 1 should be a structural command")
+	if !r.structDispatch("ic B") { // before column B
+		t.Fatal("ic B should be a structural command")
 	}
 	want := []string{"name,,age", "alice,,30", "bob,,7"}
 	if !reflect.DeepEqual(r.b.lines, want) {
-		t.Fatalf("ic 1 -> %q, want %q", r.b.lines, want)
+		t.Fatalf("ic B -> %q, want %q", r.b.lines, want)
 	}
 	if !r.b.modified {
 		t.Error("a column insert should mark the buffer modified")
@@ -1754,9 +1754,9 @@ func TestColumnsInsertAppendAndPrepend(t *testing.T) {
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b,", "c,d,"}) {
 		t.Fatalf("bare ic -> %q", r.b.lines)
 	}
-	r.structDispatch("insert column 0") // long form, prepend
+	r.structDispatch("insert column A") // long form, prepend (before A)
 	if !reflect.DeepEqual(r.b.lines, []string{",a,b,", ",c,d,"}) {
-		t.Fatalf("insert column 0 -> %q", r.b.lines)
+		t.Fatalf("insert column A -> %q", r.b.lines)
 	}
 }
 
@@ -1766,12 +1766,12 @@ func TestColumnsKillConfirmed(t *testing.T) {
 	pw.WriteString("y\r")
 	pw.Close()
 	r.rd = &reader{in: pr}
-	if !r.structDispatch("kc 2") {
-		t.Fatal("kc 2 should be a structural command")
+	if !r.structDispatch("kc B") {
+		t.Fatal("kc B should be a structural command")
 	}
 	want := []string{"name,city", "alice,rome", "bob,pisa"}
 	if !reflect.DeepEqual(r.b.lines, want) {
-		t.Fatalf("kc 2 (confirmed) -> %q, want %q", r.b.lines, want)
+		t.Fatalf("kc B (confirmed) -> %q, want %q", r.b.lines, want)
 	}
 }
 
@@ -1781,7 +1781,7 @@ func TestColumnsKillCancelled(t *testing.T) {
 	pw.WriteString("n\r")
 	pw.Close()
 	r.rd = &reader{in: pr}
-	r.structDispatch("kill column 2") // long form
+	r.structDispatch("kill column B") // long form
 	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30"}) {
 		t.Errorf("a cancelled kill must change nothing, got %q", r.b.lines)
 	}
@@ -1792,13 +1792,17 @@ func TestColumnsKillCancelled(t *testing.T) {
 
 func TestColumnsKillBareErrors(t *testing.T) {
 	r := newColRepl(t, []string{"a,b", "c,d"})
-	r.structDispatch("kc") // no column number — destructive, must refuse
+	r.structDispatch("kc") // no column letter — destructive, must refuse
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
 		t.Errorf("bare kc must change nothing, got %q", r.b.lines)
 	}
-	r.structDispatch("kc 9") // out of range
+	r.structDispatch("kc Z") // out of range
 	if !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
 		t.Errorf("out-of-range kc must change nothing, got %q", r.b.lines)
+	}
+	r.structDispatch("kc 2") // a number is no longer a valid column id
+	if r.b.modified || !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
+		t.Errorf("numeric kc must be rejected, got %q modified=%v", r.b.lines, r.b.modified)
 	}
 }
 
@@ -1806,7 +1810,7 @@ func TestColumnsQuotedRoundTrip(t *testing.T) {
 	// A quoted field with an embedded delimiter must survive a column insert
 	// verbatim — the raw-cell join keeps its quotes and inner comma intact.
 	r := newColRepl(t, []string{`a,"b,c",d`})
-	r.structDispatch("ic 2") // right of the quoted field
+	r.structDispatch("ic C") // before column C, past the quoted field
 	if r.b.lines[0] != `a,"b,c",,d` {
 		t.Fatalf("quoted round-trip -> %q, want %q", r.b.lines[0], `a,"b,c",,d`)
 	}
@@ -1816,7 +1820,7 @@ func TestColumnsUnbalancedAborts(t *testing.T) {
 	// With quotes on, a line that won't parse must abort the whole op untouched.
 	r := newColRepl(t, []string{"a,b", `c,"unterminated`})
 	before := append([]string(nil), r.b.lines...)
-	r.structDispatch("ic 1")
+	r.structDispatch("ic B")
 	if !reflect.DeepEqual(r.b.lines, before) {
 		t.Errorf("an unbalanced-quote line must abort the op, got %q", r.b.lines)
 	}
@@ -1829,19 +1833,46 @@ func TestColumnsDsvOnly(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"a,b", "c,d"}, 80, 24) // no delimiter set
-	r.structDispatch("ic 1")
+	r.structDispatch("ic B")
 	if r.b.modified || !reflect.DeepEqual(r.b.lines, []string{"a,b", "c,d"}) {
 		t.Errorf("columns outside dsv must be a no-op, got %q modified=%v", r.b.lines, r.b.modified)
 	}
 }
 
 func TestColumnRuler(t *testing.T) {
-	// Numbers sit at each column's left edge, padded to the column width plus the
+	// Letters sit at each column's left edge, padded to the column width plus the
 	// gap so they head their columns. Widths [4,3,5], printable-delim gap 3.
 	got := columnRuler([]int{4, 3, 5}, 3)
-	want := "1      2     3" // "1"+3pad +3gap +"2"+2pad +3gap +"3"
+	want := "A      B     C" // "A"+3pad +3gap +"B"+2pad +3gap +"C"
 	if got != want {
 		t.Errorf("columnRuler = %q, want %q", got, want)
+	}
+}
+
+func TestColumnLabel(t *testing.T) {
+	cases := []struct {
+		idx   int
+		label string
+	}{
+		{0, "A"}, {1, "B"}, {25, "Z"}, {26, "AA"}, {27, "AB"}, {51, "AZ"}, {52, "BA"}, {701, "ZZ"}, {702, "AAA"},
+	}
+	for _, c := range cases {
+		if got := columnLabel(c.idx); got != c.label {
+			t.Errorf("columnLabel(%d) = %q, want %q", c.idx, got, c.label)
+		}
+		// Round-trips: the label parses back to the same index.
+		if got, ok := parseColumnLabel(c.label); !ok || got != c.idx {
+			t.Errorf("parseColumnLabel(%q) = %d, %v, want %d", c.label, got, ok, c.idx)
+		}
+	}
+	// Lowercase is accepted; non-letters are rejected.
+	if got, ok := parseColumnLabel("ab"); !ok || got != 27 {
+		t.Errorf("parseColumnLabel(\"ab\") = %d, %v, want 27", got, ok)
+	}
+	for _, bad := range []string{"", "1", "A1", "!", " "} {
+		if _, ok := parseColumnLabel(bad); ok {
+			t.Errorf("parseColumnLabel(%q) should be rejected", bad)
+		}
 	}
 }
 
@@ -1970,7 +2001,7 @@ func TestStructDispatchFallThrough(t *testing.T) {
 }
 
 // TestPrintColumnsRendersRuler captures the full columns view and checks the
-// faint index ruler leads the grid, above the header, with a number per column.
+// faint letter ruler leads the grid, above the header, with a letter per column.
 func TestPrintColumnsRendersRuler(t *testing.T) {
 	var buf strings.Builder
 	old := screen
@@ -1981,11 +2012,11 @@ func TestPrintColumnsRendersRuler(t *testing.T) {
 	r.printColumns(1, 3)
 	clean := regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`).ReplaceAllString(buf.String(), "")
 	rows := strings.Split(strings.ReplaceAll(clean, "\r", ""), "\n")
-	// Find the ruler row (the one whose trimmed content starts "1") and the header.
+	// Find the ruler row (the one whose trimmed content starts "A") and the header.
 	rulerAt, headerAt := -1, -1
 	for i, ln := range rows {
 		tr := strings.TrimSpace(ln)
-		if rulerAt < 0 && strings.HasPrefix(tr, "1 ") && strings.Contains(tr, "2") {
+		if rulerAt < 0 && strings.HasPrefix(tr, "A ") && strings.Contains(tr, "B") {
 			rulerAt = i
 		}
 		if strings.Contains(ln, "name") && strings.Contains(ln, "age") {
@@ -1993,7 +2024,7 @@ func TestPrintColumnsRendersRuler(t *testing.T) {
 		}
 	}
 	if rulerAt < 0 {
-		t.Fatalf("no index ruler found in:\n%s", clean)
+		t.Fatalf("no letter ruler found in:\n%s", clean)
 	}
 	if headerAt < 0 || rulerAt >= headerAt {
 		t.Errorf("ruler (row %d) must sit above the header (row %d)", rulerAt, headerAt)

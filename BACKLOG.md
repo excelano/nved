@@ -59,7 +59,7 @@ stays the hardening milestone. NOTE: v0.9.0's `columns insert`/`ci` syntax was
 superseded by v0.10.0's `insert column`/`ic`; only v0.10.0 was promoted to apt
 (0.8.0 → 0.10.0), so the dead `ci`/`ck` syntax never shipped to apt.
 
-1. **Slice 4 — structural columns** — **SHIPPED v0.9.0, RENAMED v0.10.0.**
+1. **Slice 4 — structural columns** — **SHIPPED v0.9.0, RENAMED v0.10.0, RELABELLED v1.0.2.**
    Addressing crux RESOLVED: **command-only, no chords** (every mnemonic key was
    taken — Insert is eaten as Copy by VTE, Ctrl+I *is* Tab and would shadow
    field-nav, Delete/Insert aren't on every keyboard). Columns have no gutter
@@ -74,7 +74,13 @@ superseded by v0.10.0's `insert column`/`ic`; only v0.10.0 was promoted to apt
    buffer (a line that won't parse aborts it untouched) with ONE undo entry, and
    rejoins raw cells verbatim so quoted fields round-trip. Files: structure.go
    (was columns.go) + printRange/printColumns (command.go) + emitRuler/columnRuler
-   (dsv.go).
+   (dsv.go). **v1.0.2 (David's call): columns are named by spreadsheet LETTER (A,
+   B, … AA) instead of 1-based number** — matches xled and the Excel mental model,
+   and keeps the lettered column axis visually distinct from the numeric row axis
+   (a bare `3` is a line, `column C` is a column). The ruler shows letters;
+   `insert column` flipped to *insert before the named column* (`ic A` prepends,
+   bare appends) since there is no letter before A. columnLabel/parseColumnLabel
+   (bijective base-26) in structure.go.
 
 2. **Search — `find <regex>`** (short **`f`**) — BUILT 2026-06-14 as a word
    command (rest of line = the pattern, like `head 10`). Go `regexp` (RE2). Chosen

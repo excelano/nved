@@ -10,9 +10,9 @@ import (
 // rewrites every record (split into raw cells, add or remove one, rejoin verbatim
 // with the delimiter, so a quoted field round-trips); a row op splices the line
 // slice. Columns are dsv-only and carry no on-screen address — lines have a gutter
-// number, columns don't — so a column is named by 1-based position, surfaced on
-// demand by the `columns` index ruler. Rows ARE the primary axis and already carry
-// gutter numbers, so they need no ruler and work in plain text and aligned DSV
+// number, columns don't — so a column is named by a spreadsheet letter (A, B, …),
+// surfaced on demand by the `columns` letter ruler. Rows ARE the primary axis and
+// already carry gutter numbers, so they need no ruler and work in plain text and DSV
 // alike — in aligned view a row insert adds a well-formed empty record rather than
 // re-enabling the unsafe mid-field Enter-split the cell editor suppresses.
 //
@@ -23,7 +23,7 @@ import (
 
 // structDispatch handles the structural family — insert / kill of a row or column,
 // the short forms ic / kc / ir / kr, and the bare nouns (columns / c prints the
-// index ruler, rows reports the line count) — and reports whether s was one so the
+// letter ruler, rows reports the line count) — and reports whether s was one so the
 // main dispatch falls through to address parsing when it isn't. It manages r.last
 // itself: a report or a successful edit reprints a block, an error clears it.
 func (r *repl) structDispatch(s string) bool {
@@ -103,10 +103,50 @@ func firstWord(s string) (word, rest string) {
 
 // --- columns ---------------------------------------------------------------
 
+// columnLabel renders a 0-based column index as its spreadsheet letter — 0→A,
+// 25→Z, 26→AA, 27→AB — the bijective base-26 scheme Excel uses, where there is no
+// zero digit so AA follows Z rather than the A0 a plain base-26 would give.
+func columnLabel(idx int) string {
+	var b []byte
+	for idx >= 0 {
+		b = append(b, byte('A'+idx%26))
+		idx = idx/26 - 1
+	}
+	// The letters came out least-significant first; reverse them.
+	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
+	}
+	return string(b)
+}
+
+// parseColumnLabel parses a spreadsheet column letter (case-insensitive, one or
+// more letters: A, z, AA) into its 0-based index, the inverse of columnLabel. It
+// returns false for an empty string or any non-letter, so a stray number or
+// punctuation is rejected rather than silently coerced.
+func parseColumnLabel(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	idx := 0
+	for _, c := range s {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			idx = idx*26 + int(c-'A') + 1
+		case c >= 'a' && c <= 'z':
+			idx = idx*26 + int(c-'a') + 1
+		default:
+			return 0, false
+		}
+	}
+	return idx - 1, true // the running value is 1-based (bijective); shift to 0-based
+}
+
 // insertColumn adds one empty column. A bare arg appends it at the far right; a
-// number N inserts it to the right of column N (so N=0 prepends), the "right of
-// here" mental model. Every parseable row gains a cell; a short ragged row gets it
-// at its own end. The buffer line count is unchanged — only columns move.
+// column letter L inserts the new empty column before L — so `ic A` prepends and
+// `ic C` slips one in ahead of C, the "the new column takes this letter" mental
+// model. Every parseable row gains a cell; a short ragged row gets it at its own
+// end. The buffer line count is unchanged — only columns move.
 func (r *repl) insertColumn(arg string) {
 	if r.delim == 0 {
 		emit("columns: not in delimited view — set a delimiter first (dsv C)\n")
@@ -116,13 +156,18 @@ func (r *repl) insertColumn(arg string) {
 	appendEnd := arg == ""
 	pos := 0
 	if !appendEnd {
-		n, err := strconv.Atoi(arg)
-		if err != nil || n < 0 {
-			emitf("columns: insert takes a column number (0 to prepend), not %q\n", arg)
+		idx, ok := parseColumnLabel(arg)
+		if !ok {
+			emitf("columns: insert takes a column letter (A, B, …), not %q\n", arg)
 			r.last = nil
 			return
 		}
-		pos = n // "right of column n" is the 0-based insert index n
+		if max := r.columnCount(); idx >= max {
+			emitf("columns: no column %s — columns run A–%s, or bare ic to append\n", columnLabel(idx), columnLabel(max-1))
+			r.last = nil
+			return
+		}
+		pos = idx // insert the new column before column idx
 	}
 	changed, ok := r.rewriteColumns(func(cells []string) ([]string, bool) {
 		p := pos
@@ -141,15 +186,15 @@ func (r *repl) insertColumn(arg string) {
 	case pos == 0:
 		msg = "columns: prepended a column"
 	default:
-		msg = fmt.Sprintf("columns: inserted a column right of %d", pos)
+		msg = fmt.Sprintf("columns: inserted a column before %s", columnLabel(pos))
 	}
 	r.commitColumnEdit(changed, msg)
 }
 
-// killColumn removes column N from every row. N is required and 1-based; a bare
-// kill errors, since the op is destructive across the whole buffer and must name
-// its target. It confirms first — naming the column by header when headers are on
-// — and a row that has no column N is left untouched.
+// killColumn removes column L from every row. L is a required column letter; a
+// bare kill errors, since the op is destructive across the whole buffer and must
+// name its target. It confirms first — naming the column by header when headers are
+// on — and a row that has no column L is left untouched.
 func (r *repl) killColumn(arg string) {
 	if r.delim == 0 {
 		emit("columns: not in delimited view — set a delimiter first (dsv C)\n")
@@ -157,40 +202,41 @@ func (r *repl) killColumn(arg string) {
 		return
 	}
 	if arg == "" {
-		emit("columns: kill needs a column number — type columns to see them\n")
+		emit("columns: kill needs a column letter — type columns to see them\n")
 		r.last = nil
 		return
 	}
-	n, err := strconv.Atoi(arg)
-	if err != nil || n < 1 {
-		emitf("columns: kill takes a column number (1 or more), not %q\n", arg)
+	idx, valid := parseColumnLabel(arg)
+	if !valid {
+		emitf("columns: kill takes a column letter (A, B, …), not %q\n", arg)
 		r.last = nil
 		return
 	}
-	if max := r.columnCount(); n > max {
-		emitf("columns: no column %d — there are %d\n", n, max)
+	if max := r.columnCount(); idx >= max {
+		emitf("columns: no column %s — columns run A–%s\n", columnLabel(idx), columnLabel(max-1))
 		r.last = nil
 		return
 	}
+	col := columnLabel(idx)
 	label := ""
 	if r.headers {
-		if name := r.headerName(n); name != "" {
+		if name := r.headerName(idx + 1); name != "" {
 			label = fmt.Sprintf(" %q", name)
 		}
 	}
-	ans, ok := readLine(r.rd, fmt.Sprintf("kill column %d%s in every row? [y/N] ", n, label))
+	ans, ok := readLine(r.rd, fmt.Sprintf("kill column %s%s in every row? [y/N] ", col, label))
 	if !ok || !isYes(ans) {
 		emit("columns: kill cancelled\n")
 		r.last = nil
 		return
 	}
 	changed, pok := r.rewriteColumns(func(cells []string) ([]string, bool) {
-		return deleteColumnCells(cells, n-1)
+		return deleteColumnCells(cells, idx)
 	})
 	if !pok {
 		return
 	}
-	r.commitColumnEdit(changed, fmt.Sprintf("columns: killed column %d", n))
+	r.commitColumnEdit(changed, fmt.Sprintf("columns: killed column %s", col))
 }
 
 // insertColumnCells returns cells with an empty field inserted at 0-based index p,
@@ -258,7 +304,7 @@ func (r *repl) rewriteColumns(fn func([]string) ([]string, bool)) (changed map[i
 
 // commitColumnEdit records the one undo entry that reverses a whole column op —
 // restoring every changed line and the modified flag in a single Ctrl+U, like
-// replace all — then reprints the block with the index ruler so the new layout is
+// replace all — then reprints the block with the letter ruler so the new layout is
 // visible. The reprint stays on the block already on screen (r.last) rather than
 // jumping to the first changed line, since a column op touches the whole buffer
 // and the user is usually looking at a particular spot.
@@ -291,9 +337,9 @@ func (r *repl) commitColumnEdit(changed map[int]string, msg string) {
 }
 
 // reportColumns is the bare columns / c command: reprint the current block with
-// the index ruler above the grid, so the 1-based column numbers are visible to
-// address with insert / kill. The ruler is the column state report — its highest
-// number is the column count — so it doubles as the bare-reports-state convention.
+// the letter ruler above the grid, so the column letters are visible to address
+// with insert / kill. The ruler is the column state report — its last letter marks
+// the column count — so it doubles as the bare-reports-state convention.
 func (r *repl) reportColumns() {
 	if r.delim == 0 {
 		emit("columns: not in delimited view — set a delimiter first (dsv C)\n")

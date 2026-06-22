@@ -176,11 +176,11 @@ quotes the delimiter is data, so typing a comma in `"a,b"` works; to put one in 
 plain cell, quote it first by typing `"` at each end.
 
 Whole columns and rows are edited by command rather than from inside a cell.
-Columns have no line number, so `columns` (or `c`) prints a faint index ruler above
-the grid, numbering them from the left; `insert column [N]` — short `ic` — adds an
-empty column to the right of column N (a bare `insert column` appends, `0`
-prepends), and `kill column N` (`kc`) removes column N from every row after a
-confirmation, naming the column when headers are on. Row insert and delete —
+Columns have no line number, so `columns` (or `c`) prints a faint letter ruler above
+the grid, labelling them `A`, `B`, `C`… from the left the way a spreadsheet does;
+`insert column [L]` — short `ic` — adds an empty column before column L (a bare
+`insert column` appends, `ic A` prepends), and `kill column L` (`kc`) removes column
+L from every row after a confirmation, naming the column when headers are on. Row insert and delete —
 `insert row` / `ir` and `kill row` / `kr`, described above — work here too, the row
 insert carrying one empty field per column so it lines up. Each column or row edit
 is a single undo; for free-form restructuring, `dsv off` returns to plain text.

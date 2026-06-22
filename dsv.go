@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -494,8 +493,8 @@ func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
 
 	out("\r" + csiEL + r.header(start, end) + "\r\n")
 	if ruler {
-		// The column index ruler sits at the very top, above the header, so each
-		// number heads its column and a wide table traces straight down.
+		// The column letter ruler sits at the very top, above the header, so each
+		// letter heads its column and a wide table traces straight down.
 		r.emitRuler(w, avail, colW)
 	}
 	if showSticky {
@@ -525,9 +524,9 @@ func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
 	return true
 }
 
-// emitRuler prints the faint column-index ruler: a blank gutter (so it column-
-// aligns with the data body) followed by a 1-based number at the left edge of each
-// column. It is windowed to the visible width like the data rows — at hscroll 0,
+// emitRuler prints the faint column-letter ruler: a blank gutter (so it column-
+// aligns with the data body) followed by a spreadsheet letter at the left edge of
+// each column. It is windowed to the visible width like the data rows — at hscroll 0,
 // the command-line print never pans — with a faint › where the grid runs past the
 // edge. The whole row is drawn faint, the same dim brightness cue as the gutter.
 func (r *repl) emitRuler(w, avail int, colW []int) {
@@ -540,10 +539,10 @@ func (r *repl) emitRuler(w, avail int, colW []int) {
 	out("\r" + csiEL + faint(row) + "\r\n")
 }
 
-// columnRuler builds the index ruler body: each column's 1-based number, left-
-// aligned at the column's start, padded to the same column widths and inter-column
-// gaps alignRow uses so every number heads its column. A number wider than its
-// column (a two-digit index over a one-wide column) overruns into the gap, which
+// columnRuler builds the letter ruler body: each column's spreadsheet letter,
+// left-aligned at the column's start, padded to the same column widths and inter-
+// column gaps alignRow uses so every letter heads its column. A label wider than its
+// column (a two-letter index over a one-wide column) overruns into the gap, which
 // the gap's two-or-three columns absorb without colliding for ordinary tables.
 func columnRuler(colW []int, gapW int) string {
 	var b strings.Builder
@@ -551,7 +550,7 @@ func columnRuler(colW []int, gapW int) string {
 		if f > 0 {
 			b.WriteString(strings.Repeat(" ", gapW))
 		}
-		label := strconv.Itoa(f + 1)
+		label := columnLabel(f)
 		b.WriteString(label)
 		if f < len(colW)-1 {
 			if pad := colW[f] - len(label); pad > 0 {
