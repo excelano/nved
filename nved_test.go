@@ -24,21 +24,27 @@ func newEditor(t *testing.T, lines []string, cy, cx int) *editor {
 
 func TestSplitLines(t *testing.T) {
 	cases := []struct {
-		in   string
-		want []string
+		in       string
+		want     []string
+		wantCRLF bool
 	}{
-		{"", []string{""}},     // empty file -> one empty line
-		{"a", []string{"a"}},   // no trailing newline
-		{"a\n", []string{"a"}}, // trailing newline dropped
-		{"a\nb", []string{"a", "b"}},
-		{"a\nb\n", []string{"a", "b"}},
-		{"\n", []string{""}},         // a lone newline -> one empty line
-		{"a\n\n", []string{"a", ""}}, // intentional trailing blank line kept
+		{"", []string{""}, false},     // empty file -> one empty line
+		{"a", []string{"a"}, false},   // no trailing newline
+		{"a\n", []string{"a"}, false}, // trailing newline dropped
+		{"a\nb", []string{"a", "b"}, false},
+		{"a\nb\n", []string{"a", "b"}, false},
+		{"\n", []string{""}, false},         // a lone newline -> one empty line
+		{"a\n\n", []string{"a", ""}, false}, // intentional trailing blank line kept
+		// Windows CRLF: carriage returns stripped, the lines clean, crlf reported.
+		{"a\r\nb\r\n", []string{"a", "b"}, true},
+		{"a\r\nb", []string{"a", "b"}, true},                   // CRLF then a bare final line
+		{"\"x,y\"\r\n", []string{"\"x,y\""}, true},             // the bug: a trailing quoted field keeps no CR
+		{"a\r\n\r\n", []string{"a", ""}, true},                 // blank CRLF line kept
 	}
 	for _, c := range cases {
-		got := splitLines([]byte(c.in))
-		if !reflect.DeepEqual(got, c.want) {
-			t.Errorf("splitLines(%q) = %q, want %q", c.in, got, c.want)
+		got, crlf := splitLines([]byte(c.in))
+		if !reflect.DeepEqual(got, c.want) || crlf != c.wantCRLF {
+			t.Errorf("splitLines(%q) = %q,%v, want %q,%v", c.in, got, crlf, c.want, c.wantCRLF)
 		}
 	}
 }
@@ -145,6 +151,36 @@ func TestSaveOpenRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b2.lines, want) {
 		t.Errorf("round-trip lines = %q, want %q", b2.lines, want)
+	}
+}
+
+// A file opened with CRLF endings keeps them on save, and its in-memory lines
+// carry no carriage returns — the fix for the quoted-field-at-EOL parse failure.
+func TestCRLFRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "win.csv")
+	if err := os.WriteFile(p, []byte("\"a,b\"\r\nc\r\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := openBuffer(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b.crlf {
+		t.Error("CRLF file should set crlf")
+	}
+	want := []string{`"a,b"`, "c"}
+	if !reflect.DeepEqual(b.lines, want) {
+		t.Errorf("loaded lines = %q, want %q (no stray CR)", b.lines, want)
+	}
+	if _, err := b.save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "\"a,b\"\r\nc\r\n" {
+		t.Errorf("saved bytes = %q, want CRLF preserved", got)
 	}
 }
 

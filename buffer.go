@@ -20,6 +20,13 @@ type buffer struct {
 	// and the test buffers need not set it; rows record switches it to the ASCII
 	// record separator (0x1E). This is the record layer — see dsv.go.
 	recSep rune
+
+	// crlf records that the file was loaded with Windows CRLF line endings.
+	// splitLines strips the carriage returns so the in-memory lines are clean —
+	// the field parser, find/replace, and cursor math all work on a stray-CR-free
+	// buffer — and save re-emits "\r\n" so the file keeps its convention. It only
+	// applies to newline-separated text; the ASCII record separator carries none.
+	crlf bool
 }
 
 // sep is the buffer's record separator, defaulting an unset (zero) recSep to
@@ -59,7 +66,8 @@ func openBuffer(name string) (*buffer, bool, error) {
 		}
 		return nil, false, err
 	}
-	return &buffer{lines: splitLines(data), name: name}, false, nil
+	lines, crlf := splitLines(data)
+	return &buffer{lines: lines, name: name, crlf: crlf}, false, nil
 }
 
 // save writes the buffer to its file, one record per line joined by the buffer's
@@ -67,11 +75,16 @@ func openBuffer(name string) (*buffer, bool, error) {
 // record), each record followed by a trailing separator, and returns the number
 // of lines written.
 func (b *buffer) save() (int, error) {
-	sep := string(b.sep())
+	term := string(b.sep())
+	// Restore Windows line endings if the file was loaded with them. Only newline-
+	// separated text carries CRLF; under the ASCII record separator there is none.
+	if b.crlf && b.recSep == 0 {
+		term = "\r\n"
+	}
 	var sb strings.Builder
 	for _, ln := range b.lines {
 		sb.WriteString(ln)
-		sb.WriteString(sep)
+		sb.WriteString(term)
 	}
 	if err := os.WriteFile(b.name, []byte(sb.String()), 0644); err != nil {
 		return 0, err
@@ -81,9 +94,16 @@ func (b *buffer) save() (int, error) {
 }
 
 // splitLines turns raw file bytes into lines on newline boundaries — the layout
-// every file opens with, before any rows command.
-func splitLines(data []byte) []string {
-	return splitRecords(string(data), '\n')
+// every file opens with, before any rows command. A file written with Windows
+// CRLF endings is normalized to bare newlines and reported with crlf true, so the
+// in-memory lines carry no stray carriage returns and save can restore "\r\n".
+func splitLines(data []byte) (lines []string, crlf bool) {
+	s := string(data)
+	if strings.Contains(s, "\r\n") {
+		crlf = true
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+	}
+	return splitRecords(s, '\n'), crlf
 }
 
 // splitRecords splits s into records on sep, dropping a single trailing
