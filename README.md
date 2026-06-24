@@ -23,7 +23,14 @@ curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 sudo apt install nved
 ```
 
-With a Go toolchain:
+On Windows, download the `windows_amd64` zip from the
+[releases page](https://github.com/excelano/nved/releases), unzip it, and run
+`nved.exe` from [Windows Terminal](https://aka.ms/terminal). nved draws with
+ANSI escape sequences, which the modern terminal renders but the legacy console
+host (`conhost`) does not — so a recent Windows 10 or 11 with Windows Terminal
+is the target.
+
+With a Go toolchain (any platform):
 
 ```sh
 go install github.com/excelano/nved@latest

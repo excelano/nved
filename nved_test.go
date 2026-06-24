@@ -1765,7 +1765,7 @@ func TestColumnsKillConfirmed(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	pw.WriteString("y\r")
 	pw.Close()
-	r.rd = &reader{in: pr}
+	r.rd = newReaderFrom(pr)
 	if !r.structDispatch("kc B") {
 		t.Fatal("kc B should be a structural command")
 	}
@@ -1780,7 +1780,7 @@ func TestColumnsKillCancelled(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	pw.WriteString("n\r")
 	pw.Close()
-	r.rd = &reader{in: pr}
+	r.rd = newReaderFrom(pr)
 	r.structDispatch("kill column B") // long form
 	if !reflect.DeepEqual(r.b.lines, []string{"name,age", "alice,30"}) {
 		t.Errorf("a cancelled kill must change nothing, got %q", r.b.lines)
@@ -1941,7 +1941,7 @@ func TestRowsKillRangeConfirmed(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	pw.WriteString("y\r")
 	pw.Close()
-	r.rd = &reader{in: pr}
+	r.rd = newReaderFrom(pr)
 	r.structDispatch("kill row 2.4") // a range: confirms, reuses parseAddress
 	if !reflect.DeepEqual(r.b.lines, []string{"1", "5"}) {
 		t.Fatalf("kill row 2.4 (confirmed) -> %q", r.b.lines)
@@ -1955,7 +1955,7 @@ func TestRowsKillRangeCancelled(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	pw.WriteString("n\r")
 	pw.Close()
-	r.rd = &reader{in: pr}
+	r.rd = newReaderFrom(pr)
 	r.structDispatch("kr 2.3")
 	if !reflect.DeepEqual(r.b.lines, []string{"1", "2", "3", "4"}) {
 		t.Errorf("a cancelled range kill must change nothing, got %q", r.b.lines)
@@ -1969,7 +1969,7 @@ func TestRowsKillRefusesAll(t *testing.T) {
 	pr, pw, _ := os.Pipe()
 	pw.WriteString("y\r")
 	pw.Close()
-	r.rd = &reader{in: pr}
+	r.rd = newReaderFrom(pr)
 	r.structDispatch("kr 1.2") // would empty the buffer — refused before the confirm
 	if !reflect.DeepEqual(r.b.lines, []string{"only", "two"}) {
 		t.Errorf("killing every line must be refused, got %q", r.b.lines)

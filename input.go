@@ -1,13 +1,12 @@
 package main
 
 import (
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"golang.org/x/sys/unix"
 )
 
 type keyKind int
@@ -44,27 +43,59 @@ type key struct {
 	ctrl bool // a Ctrl modifier rode along with a navigation key
 }
 
-// reader decodes terminal input into keys. It buffers the bytes from each Read
-// so an escape sequence delivered in one chunk is parsed whole.
+// reader decodes terminal input into keys. A background goroutine reads the
+// input source and feeds its bytes onto a channel; the decoder pulls from the
+// channel one byte at a time. This keeps the decoder portable — distinguishing
+// a bare Escape from an arrow's escape sequence is a channel receive with a
+// timeout (see waitByte), not a platform-specific readiness poll. peek holds a
+// single byte staged by waitByte but not yet consumed.
 type reader struct {
-	in   *os.File
-	raw  [256]byte
-	data []byte
+	bytes chan byte
+	peek  int // a pushed-back byte, or -1 when none
 }
 
-func newReader() *reader { return &reader{in: os.Stdin} }
+func newReader() *reader { return newReaderFrom(os.Stdin) }
+
+// newReaderFrom starts a reader over an arbitrary source (os.Stdin in normal
+// use; a pipe in tests). The pump goroutine lives until the source reaches EOF,
+// at which point it closes the channel and readByte reports end of input.
+func newReaderFrom(in io.Reader) *reader {
+	rd := &reader{bytes: make(chan byte, 1024), peek: -1}
+	go rd.pump(in)
+	return rd
+}
+
+func (rd *reader) pump(in io.Reader) {
+	var buf [256]byte
+	for {
+		n, err := in.Read(buf[:])
+		for _, b := range buf[:n] {
+			rd.bytes <- b
+		}
+		if err != nil {
+			close(rd.bytes)
+			return
+		}
+	}
+}
 
 func (rd *reader) readByte() (byte, bool) {
-	if len(rd.data) == 0 {
-		n, err := rd.in.Read(rd.raw[:])
-		if err != nil || n == 0 {
-			return 0, false
-		}
-		rd.data = rd.raw[:n]
+	if rd.peek >= 0 {
+		b := byte(rd.peek)
+		rd.peek = -1
+		return b, true
 	}
-	b := rd.data[0]
-	rd.data = rd.data[1:]
-	return b, true
+	b, ok := <-rd.bytes
+	return b, ok
+}
+
+// peekByte returns the byte waitByte staged, without consuming it, so readKey
+// can look at the character after an ESC before deciding to parse a sequence.
+func (rd *reader) peekByte() (byte, bool) {
+	if rd.peek >= 0 {
+		return byte(rd.peek), true
+	}
+	return 0, false
 }
 
 // escTimeout is how long readKey waits after a lone ESC for the rest of an
@@ -72,24 +103,23 @@ func (rd *reader) readByte() (byte, bool) {
 // sends an arrow's bytes back-to-back, so a gap this long means a real Escape.
 const escTimeout = 50 * time.Millisecond
 
-// waitByte reports whether a byte is available within d, pulling it into the
-// buffer if so. It is how readKey distinguishes a bare Escape from the lead byte
-// of an arrow sequence that arrived in a separate read.
+// waitByte reports whether a byte is available within d, staging it in peek if
+// so. It is how readKey distinguishes a bare Escape from the lead byte of an
+// arrow sequence that arrived a moment later.
 func (rd *reader) waitByte(d time.Duration) bool {
-	if len(rd.data) > 0 {
+	if rd.peek >= 0 {
 		return true
 	}
-	fds := []unix.PollFd{{Fd: int32(rd.in.Fd()), Events: unix.POLLIN}}
-	n, err := unix.Poll(fds, int(d/time.Millisecond))
-	if err != nil || n == 0 {
+	select {
+	case b, ok := <-rd.bytes:
+		if !ok {
+			return false
+		}
+		rd.peek = int(b)
+		return true
+	case <-time.After(d):
 		return false
 	}
-	m, err := rd.in.Read(rd.raw[:])
-	if err != nil || m == 0 {
-		return false
-	}
-	rd.data = rd.raw[:m]
-	return true
 }
 
 // readKey returns the next decoded key. ok is false at end of input.
@@ -101,11 +131,11 @@ func (rd *reader) readKey() (key, bool) {
 	switch {
 	case b == 0x1b: // ESC: sequence lead-in, or the bare Escape key
 		if rd.waitByte(escTimeout) {
-			if rd.data[0] == '[' {
+			if pb, _ := rd.peekByte(); pb == '[' {
 				rd.readByte()
 				return rd.readCSI(), true
 			}
-			if rd.data[0] == 'O' { // application-cursor arrows
+			if pb, _ := rd.peekByte(); pb == 'O' { // application-cursor arrows
 				rd.readByte()
 				return rd.readSS3(), true
 			}

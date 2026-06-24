@@ -3,9 +3,11 @@
 #   goreleaser release --snapshot --clean
 # Snapshots produce binaries in ./dist/ without touching GitHub.
 #
-# nved uses golang.org/x/sys/unix, so it is Unix-only: linux + darwin, no
-# windows. apt only consumes the linux .debs; the darwin tarballs are a
-# convenience for source-free installs on a Mac.
+# Cross-platform: linux, darwin, and windows. apt only consumes the linux
+# .debs; the darwin tarballs and the windows zip are a convenience for
+# source-free installs. Terminal input is portable Go (a reader goroutine, not
+# unix.Poll), and console_windows.go switches the Windows console into ANSI
+# mode at startup.
 
 version: 2
 
@@ -22,6 +24,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -34,6 +37,9 @@ builds:
 archives:
   - id: nved
     name_template: "nved_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
     files:
       - LICENSE
       - README.md

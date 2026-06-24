@@ -139,6 +139,10 @@ func main() {
 	}
 	defer term.Restore(fd, oldState)
 
+	// On Windows, switch the console into ANSI mode so the escape sequences nved
+	// emits are interpreted rather than printed. A no-op on Unix.
+	enableVirtualTerminal()
+
 	switch {
 	case name == "":
 		emit("nved — empty buffer (no file)\n")
