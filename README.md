@@ -204,6 +204,34 @@ corrupting a non-UTF-8 source by saving edits as UTF-8, `s` (save) refuses to
 overwrite the original file in that case — `s <newname>` to a different file
 still works, so you can dump the buffer somewhere else and then convert.
 
+## As your default editor
+
+nved honors the contract that `git`, `crontab -e`, and `sudoedit` expect of an
+editor: it takes the file as an argument, writes your changes back to that path
+when you save, and exits zero. Pair it with the `+.` start spec so the file is
+printed and ready to climb into the moment it opens — without it nved comes up at
+a bare prompt with nothing shown:
+
+```sh
+export VISUAL="nved +."
+git config --global core.editor "nved +."
+```
+
+nved drives the terminal in raw mode, so it fits the `VISUAL` slot — the
+full-screen editor — rather than `EDITOR`, the line-editor fallback some tools
+reach for when there is no usable terminal. If you want that slot filled too,
+[ved](https://github.com/excelano/ved) is the natural companion: an `ed`-style
+line editor that reads commands a line at a time, which is exactly what `EDITOR`
+is meant to name.
+
+```sh
+export EDITOR=ved
+```
+
+A normal exit returns zero whether or not you saved, so quitting without writing
+leaves the file untouched — git then declines the empty commit, the same as
+backing out of any editor without saving.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Authored by David Anderson, with AI assistance.
