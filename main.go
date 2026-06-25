@@ -11,7 +11,22 @@ import (
 	"os"
 
 	"golang.org/x/term"
+
+	"github.com/excelano/encsniff-go"
 )
+
+// warnIfNonUTF8 sniffs path and prints a one-line iconv hint when the file
+// looks like a non-UTF-8 encoding (UTF-7 or UTF-16). UTF-8 BOM is left to the
+// existing byte-for-byte read path; nved preserves the BOM on save. Sniff
+// failures are silently ignored — the buffer load already succeeded.
+func warnIfNonUTF8(path string) {
+	s, err := encsniff.SniffFile(path)
+	if err != nil || s.Action != encsniff.Warn {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "nved: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	fmt.Fprintf(os.Stderr, "hint: %s\n", s.Hint)
+}
 
 const prompt = "> " // a plain chevron, like the Claude Code prompt
 
@@ -125,6 +140,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nved: %v\n", err)
 		os.Exit(1)
+	}
+
+	if name != "" && !newFile {
+		warnIfNonUTF8(name)
 	}
 
 	fd := int(os.Stdin.Fd())
