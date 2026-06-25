@@ -132,6 +132,35 @@ func TestHeadTail(t *testing.T) {
 	}
 }
 
+// A buffer loaded from a non-UTF-8 file (UTF-7 / UTF-16) refuses to save back
+// to the original — saving edits as UTF-8 would silently corrupt the source.
+// Save-as to a different filename remains allowed as an escape valve.
+func TestSaveRefusesNonUTF8Source(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "Roster.csv")
+	b := &buffer{
+		name:            src,
+		lines:           []string{"a", "b"},
+		modified:        true,
+		loadedAsNonUTF8: "UTF-7",
+		loadedName:      src,
+	}
+	if _, err := b.save(); err == nil {
+		t.Fatal("save to non-UTF-8 source should error")
+	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Errorf("error = %q, want 'refusing to overwrite ...'", err)
+	}
+
+	// Save-as to a different filename succeeds.
+	dst := filepath.Join(t.TempDir(), "Roster_dump.csv")
+	b.name = dst
+	if _, err := b.save(); err != nil {
+		t.Fatalf("save-as to %s should succeed, got %v", dst, err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Errorf("save-as did not produce %s: %v", dst, err)
+	}
+}
+
 func TestSaveOpenRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "f.txt")
 	want := []string{"one", "two", "three"}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -27,6 +28,15 @@ type buffer struct {
 	// buffer — and save re-emits "\r\n" so the file keeps its convention. It only
 	// applies to newline-separated text; the ASCII record separator carries none.
 	crlf bool
+
+	// loadedAsNonUTF8 holds the detected encoding (e.g. "UTF-7") when the file
+	// was opened with a non-UTF-8 signature. loadedName is the filename it was
+	// loaded from. Together they implement read-only-on-original: save refuses
+	// to write back to loadedName so the user does not silently corrupt a UTF-7
+	// or UTF-16 file by saving edits as UTF-8. Save-as to a different filename
+	// remains allowed as an escape valve.
+	loadedAsNonUTF8 string
+	loadedName      string
 }
 
 // sep is the buffer's record separator, defaulting an unset (zero) recSep to
@@ -75,6 +85,11 @@ func openBuffer(name string) (*buffer, bool, error) {
 // record), each record followed by a trailing separator, and returns the number
 // of lines written.
 func (b *buffer) save() (int, error) {
+	if b.loadedAsNonUTF8 != "" && b.name == b.loadedName {
+		return 0, fmt.Errorf(
+			"refusing to overwrite %s (loaded as %s); convert with iconv first, or use `s <newname>` to write elsewhere",
+			b.name, b.loadedAsNonUTF8)
+	}
 	term := string(b.sep())
 	// Restore Windows line endings if the file was loaded with them. Only newline-
 	// separated text carries CRLF; under the ASCII record separator there is none.
