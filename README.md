@@ -195,6 +195,15 @@ is a single undo; for free-form restructuring, `dsv off` returns to plain text.
 A quoted field keeps its quotes on screen and on save, so you always see which
 cells are quoted and which aren't.
 
+## Input encoding
+
+nved expects UTF-8. If the file looks like UTF-7 (the `+ACI-` escape that
+Scoutbook exports emit) or carries a UTF-16 BOM, nved prints a warning at
+startup with the `iconv` command needed to convert it. To avoid silently
+corrupting a non-UTF-8 source by saving edits as UTF-8, `s` (save) refuses to
+overwrite the original file in that case — `s <newname>` to a different file
+still works, so you can dump the buffer somewhere else and then convert.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Authored by David Anderson, with AI assistance.
