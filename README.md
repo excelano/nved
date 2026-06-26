@@ -23,6 +23,14 @@ curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 sudo apt install nved
 ```
 
+With [Homebrew](https://brew.sh) on macOS or Linux, so `brew upgrade` keeps it current:
+
+```sh
+brew tap excelano/tap
+brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
+brew install nved
+```
+
 On Windows, download the `windows_amd64` zip from the
 [releases page](https://github.com/excelano/nved/releases), unzip it, and run
 `nved.exe` from [Windows Terminal](https://aka.ms/terminal). nved draws with
