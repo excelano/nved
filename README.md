@@ -15,28 +15,59 @@ files.
 
 ## Install
 
-On Debian or Ubuntu, add the [Excelano apt repository](https://excelano.com/apt/)
-once and updates flow through `apt upgrade`:
+### Debian and Ubuntu
+
+Add the [Excelano apt repository](https://excelano.com/apt/) once (one-time setup):
 
 ```sh
 curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
+```
+
+Then install it, so `apt upgrade` keeps it current:
+
+```sh
 sudo apt install nved
 ```
 
-With [Homebrew](https://brew.sh) on macOS or Linux, so `brew upgrade` keeps it current:
+### Homebrew
+
+On macOS or Linux, tap and trust the repository once — Homebrew gates third-party taps behind explicit trust (one-time setup):
 
 ```sh
 brew tap excelano/tap
-brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
+brew trust excelano/tap
+```
+
+Then install it, so `brew upgrade` keeps it current:
+
+```sh
 brew install nved
 ```
 
-On Windows, download the `windows_amd64` zip from the
+### Prebuilt binary (Linux and macOS, x86_64 and arm64)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/install.sh | sh
+```
+
+If the installer needs to write to a root-owned directory like `/usr/local/bin` (typical when upgrading a previously sudo-installed copy), wrap `sh`, not `curl`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/install.sh | sudo sh
+```
+
+Pin a version with `NVED_VERSION=v1.2.1`, or install elsewhere with `NVED_INSTALL_DIR=$HOME/bin`. To uninstall: `curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/uninstall.sh | sh` (or `sudo apt remove nved` if installed via apt).
+
+### Windows
+
+Download the `windows_amd64` zip from the
 [releases page](https://github.com/excelano/nved/releases), unzip it, and run
 `nved.exe` from [Windows Terminal](https://aka.ms/terminal). nved draws with
 ANSI escape sequences, which the modern terminal renders but the legacy console
 host (`conhost`) does not — so a recent Windows 10 or 11 with Windows Terminal
 is the target.
+
+### Go
 
 With a Go toolchain (any platform):
 
