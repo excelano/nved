@@ -75,7 +75,7 @@ With a Go toolchain (any platform):
 go install github.com/excelano/nved@latest
 ```
 
-## Build from source
+### Build from source
 
 ```sh
 git clone https://github.com/excelano/nved
