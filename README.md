@@ -60,9 +60,15 @@ Pin a version with `NVED_VERSION=v1.2.1`, or install elsewhere with `NVED_INSTAL
 
 ### Windows
 
-Download the `windows_amd64` zip from the
-[releases page](https://github.com/excelano/nved/releases), unzip it, and run
-`nved.exe` from [Windows Terminal](https://aka.ms/terminal). nved draws with
+With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current:
+
+```powershell
+winget install Excelano.nved
+```
+
+Or download the `windows_amd64` zip from the
+[releases page](https://github.com/excelano/nved/releases) and unzip it. Either
+way, run `nved` from [Windows Terminal](https://aka.ms/terminal): nved draws with
 ANSI escape sequences, which the modern terminal renders but the legacy console
 host (`conhost`) does not — so a recent Windows 10 or 11 with Windows Terminal
 is the target.
