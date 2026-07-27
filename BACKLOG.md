@@ -5,9 +5,38 @@ a small REPL-flavored terminal editor (not a TUI) — print a range by line numb
 climb into the block, edit in place; scrollback preserved. See `README.md` for
 the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
+**Reconciled against the repo 2026-07-27.** Current release **v1.3.0**; no open
+issues or PRs on GitHub, so this file is the only place work is tracked. The two
+long sections below ("Build log" and "DSV design — as built") are **history, not
+queue** — everything in them shipped. The live queue is "Open" immediately below.
+
 ---
 
-## Next
+## Open
+
+Everything actually outstanding, in one place.
+
+- **Viewport slice** — bound editing to a screenful with a scrolling viewport
+  (`e.top` offset) so a mid-edit split that grows the block past the screen can't
+  desync the cursor or scroll the header off. Still THEORETICAL — never hit in
+  dogfooding. Subsumes the hard part of SIGWINCH. Detail under "Later".
+- **SIGWINCH** — mid-edit resize. Size is still refreshed only at print/climb
+  (`main.go:224` documents the gap); nved installs no signal handler.
+- **USV separators** — GATED, post-1.0, no commitment. Build when a USV file
+  actually turns up in dogfooding. Detail under "Later".
+- **Markdown view** — PARKED, leaning NO. The tightly-scoped shape that survived
+  the kicking is recorded under "Later" so it isn't relitigated from scratch.
+- **Multi-line quoted-field page sizing** — the raw fallback sizes its page as if
+  rows don't wrap (`physHeight` returns 1 whenever a delimiter is set), so a
+  fallback block of long lines can overflow the screen by a row. Rare (no embedded
+  newlines in `rows record` files); punted at v1 and still open.
+
+DONE, removed from the queue: **v1.0 hardening** — SECURITY.md, `.github/dependabot.yml`,
+and `.github/workflows/codeql.yml` are all in the repo and CodeQL is running green.
+
+---
+
+## Build log — v0.5.0 → v1.1.0 (history)
 
 **CSV / TSV / DSV Phase 1 (display) shipped in v0.6.0** and **Phase 2 (aligned
 cell editing) in v0.7.0.** The field-layer commands (`dsv`/`quotes`/`headers`),
@@ -59,7 +88,7 @@ stays the hardening milestone. NOTE: v0.9.0's `columns insert`/`ci` syntax was
 superseded by v0.10.0's `insert column`/`ic`; only v0.10.0 was promoted to apt
 (0.8.0 → 0.10.0), so the dead `ci`/`ck` syntax never shipped to apt.
 
-1. **Slice 4 — structural columns** — **SHIPPED v0.9.0, RENAMED v0.10.0, RELABELLED v1.0.2.**
+1. **Slice 4 — structural columns** — **SHIPPED v0.9.0, RENAMED v0.10.0, RELABELLED v1.1.0.**
    Addressing crux RESOLVED: **command-only, no chords** (every mnemonic key was
    taken — Insert is eaten as Copy by VTE, Ctrl+I *is* Tab and would shadow
    field-nav, Delete/Insert aren't on every keyboard). Columns have no gutter
@@ -74,7 +103,7 @@ superseded by v0.10.0's `insert column`/`ic`; only v0.10.0 was promoted to apt
    buffer (a line that won't parse aborts it untouched) with ONE undo entry, and
    rejoins raw cells verbatim so quoted fields round-trip. Files: structure.go
    (was columns.go) + printRange/printColumns (command.go) + emitRuler/columnRuler
-   (dsv.go). **v1.0.2 (David's call): columns are named by spreadsheet LETTER (A,
+   (dsv.go). **v1.1.0 (David's call): columns are named by spreadsheet LETTER (A,
    B, … AA) instead of 1-based number** — matches xled and the Excel mental model,
    and keeps the lettered column axis visually distinct from the numeric row axis
    (a bare `3` is a line, `column C` is a column). The ruler shows letters;
@@ -170,8 +199,9 @@ carry gutter addresses, so **no ruler needed**. As shipped:
 
 Deferred, NOT now: **viewport + SIGWINCH** — the block-outgrows-screen desync is
 still THEORETICAL (never hit in dogfooding); stays backlog as correctness
-insurance, do it when it bites or with hardening. **v1.0 hardening** (SECURITY.md,
-Dependabot, CodeQL) — later. Both detailed under "Later".
+insurance, do it when it bites. Detailed under "Later"; still open as of v1.3.0.
+(**v1.0 hardening** — SECURITY.md, Dependabot, CodeQL — was listed here as
+"later"; it SHIPPED. All three are in the repo.)
 
 (Shipped in v0.5.0: persistent, buffer-level Ctrl+U undo — the stack lives on the
 buffer, so Ctrl+U works at the `>` prompt, survives climbing in and out, and
@@ -180,7 +210,15 @@ since widths derive from text.)
 
 ---
 
-## Queued — needs a design pass before code
+## DSV design — as built (history)
+
+**This section is NOT a queue.** It was written as the pre-code design pass for
+DSV support, and all four slices shipped: 1 display (v0.6.0), 2 cell editing
+(v0.7.0), 3 wrap/pan (v0.7.1), 4 structural columns (v0.9.0 → v0.10.0 → v1.1.0).
+It stays in the file because it carries the *why* behind decisions the code no
+longer explains on its own — the reject list, the architectural crux, and the
+two-layer record/field split. Read it before changing DSV behavior; don't read
+it as work to do.
 
 ### Native CSV / TSV / DSV handling
 
@@ -291,7 +329,11 @@ widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
 
 ---
 
-## Later
+## Later — rationale behind the Open items
+
+The reasoning, gates, and settled decisions backing the short list at the top.
+Entries here carry the *why* so a future session can act without re-deriving it,
+and so parked ideas don't get relitigated from scratch.
 
 - **Round-out decision — DECIDED C (2026-06-14):** edit only the printed block,
   reprint to edit elsewhere; NOT roam-by-paging (A) or a managed viewport (B).
@@ -352,5 +394,6 @@ widths block-scoped. Slices: 1 display, 2 cell-editing, 3 wrap/pan, 4 structural
   the name itself can't recruit other formats. Markdown ONLY — code-language
   highlighting stays a hard no (that's the IDE slope; `bat` exists). NOT a 1.0
   thing regardless.
-- **v1.0 hardening** — SECURITY.md, Dependabot, CodeQL (deferred from the initial
-  releases).
+- ~~**v1.0 hardening** — SECURITY.md, Dependabot, CodeQL~~ — **DONE.** All three
+  landed; CodeQL runs green. Kept struck-through rather than deleted so a future
+  session doesn't re-add it as an obvious gap.
