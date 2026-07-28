@@ -5,16 +5,26 @@ a small REPL-flavored terminal editor (not a TUI) — print a range by line numb
 climb into the block, edit in place; scrollback preserved. See `README.md` for
 the user model and `~/Downloads/nved-design-spec.md` for the original design.
 
-**Reconciled against the repo 2026-07-27.** Current release **v1.3.0**; no open
-issues or PRs on GitHub, so this file is the only place work is tracked. The two
-long sections below ("Build log" and "DSV design — as built") are **history, not
-queue** — everything in them shipped. The live queue is "Open" immediately below.
+> **Status (2026-07-27):** shipped on apt, brew, and winget, and David's daily
+> driver; run `fleet nved` for the current version. No open issues or PRs, so
+> this file is the only place work is tracked. The two long sections below
+> ("Build log" and "DSV design — as built") are **history, not queue** —
+> everything in them shipped. The live queue is "Open", immediately below.
 
 ---
 
 ## Open
 
 Everything actually outstanding, in one place.
+
+**When you return, start here.** Nothing below is urgent — nved is David's daily
+driver and none of it has bitten in real use. If you want the highest-value pick:
+the **viewport slice** first, because it is the only correctness item and it
+subsumes the hard part of SIGWINCH, so doing it makes the second entry mostly
+free. The **multi-line quoted-field page sizing** is the other real defect and is
+much smaller. USV and the markdown view are gated on triggers that have not
+fired — read their entries under "Later" before picking either up, since both
+were argued through in depth and the arguments have not changed.
 
 - **Viewport slice** — bound editing to a screenful with a scrolling viewport
   (`e.top` offset) so a mid-edit split that grows the block past the screen can't
