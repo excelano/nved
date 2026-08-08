@@ -117,7 +117,7 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "--version", "-V":
-			fmt.Printf("nved %s (%s, %s)\n", version, commit, date)
+			fmt.Println(versionLine())
 			return
 		case "--help", "-h":
 			printUsage()
