@@ -37,9 +37,9 @@ func TestSplitLines(t *testing.T) {
 		{"a\n\n", []string{"a", ""}, false}, // intentional trailing blank line kept
 		// Windows CRLF: carriage returns stripped, the lines clean, crlf reported.
 		{"a\r\nb\r\n", []string{"a", "b"}, true},
-		{"a\r\nb", []string{"a", "b"}, true},                   // CRLF then a bare final line
-		{"\"x,y\"\r\n", []string{"\"x,y\""}, true},             // the bug: a trailing quoted field keeps no CR
-		{"a\r\n\r\n", []string{"a", ""}, true},                 // blank CRLF line kept
+		{"a\r\nb", []string{"a", "b"}, true},       // CRLF then a bare final line
+		{"\"x,y\"\r\n", []string{"\"x,y\""}, true}, // the bug: a trailing quoted field keeps no CR
+		{"a\r\n\r\n", []string{"a", ""}, true},     // blank CRLF line kept
 	}
 	for _, c := range cases {
 		got, crlf := splitLines([]byte(c.in))
