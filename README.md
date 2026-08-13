@@ -131,6 +131,13 @@ nved +10.30 notes.txt     # ... lines 10 through 30
 nved +tail notes.txt      # ... the last screenful, ready to edit
 ```
 
+Give more than one and they run left to right, so the file can be set up before
+the range is printed:
+
+```sh
+nved +csv +42 data.csv    # line 42, already split into columns
+```
+
 Out-of-range numbers clamp to the nearest valid line. A range taller than the
 terminal prints one screenful from the top; **Page-Up** and **Page-Down** reprint
 the screenful above or below so you can walk through it.
@@ -216,7 +223,12 @@ it:
 ```sh
 nved +csv data.csv
 nved +asv data.bin
+nved +dsv ';' +quotes on +headers on data.dsv
 ```
+
+Specs run in the order written, so a preset can be laid down first and a single
+knob tuned after it — `+csv +headers off` reads a comma file whose first row is
+data, while `+headers off +csv` turns headers back on and is not the same thing.
 
 Climb into an aligned block and you edit it in place, cell by cell. `Tab` and
 `Shift-Tab` (or `Ctrl-Left` / `Ctrl-Right`) move field to field, and the grid

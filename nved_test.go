@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -639,6 +640,33 @@ func TestSaveArg(t *testing.T) {
 		name, ok := saveArg(c.in)
 		if name != c.wantName || ok != c.wantOK {
 			t.Errorf("saveArg(%q) = (%q, %v), want (%q, %v)", c.in, name, ok, c.wantName, c.wantOK)
+		}
+	}
+}
+
+func TestParseArgs(t *testing.T) {
+	for _, c := range []struct {
+		in        []string
+		wantName  string
+		wantSpecs []string
+	}{
+		{[]string{}, "", nil},
+		{[]string{"notes.txt"}, "notes.txt", nil},
+		{[]string{"+42", "notes.txt"}, "notes.txt", []string{"42"}},
+		{[]string{"notes.txt", "+42"}, "notes.txt", []string{"42"}},
+		// Several run in the order written, which is what lets a view be set
+		// up before the range is printed.
+		{[]string{"+csv", "+42", "data.csv"}, "data.csv", []string{"csv", "42"}},
+		{[]string{"+csv", "+headers off", "d.csv"}, "d.csv", []string{"csv", "headers off"}},
+		// A second bare word is not a second file.
+		{[]string{"a.txt", "b.txt"}, "a.txt", nil},
+		// A lone "+" is too short to be a spec, so it is taken as a name.
+		{[]string{"+"}, "+", nil},
+	} {
+		name, specs := parseArgs(c.in)
+		if name != c.wantName || !slices.Equal(specs, c.wantSpecs) {
+			t.Errorf("parseArgs(%q) = (%q, %q), want (%q, %q)",
+				c.in, name, specs, c.wantName, c.wantSpecs)
 		}
 	}
 }

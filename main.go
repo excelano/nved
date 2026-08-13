@@ -125,19 +125,7 @@ func main() {
 		}
 	}
 
-	// A "+SPEC" argument (vim/less style) opens straight to a range: SPEC is any
-	// prompt command — "+3.10", "+tail", "+$-20.$" — run once on startup so the
-	// block is sitting above the prompt, exactly as if it had been typed. The "+"
-	// marks it unambiguously, so it works in any position and never collides with
-	// a file named like an address.
-	var name, startSpec string
-	for _, a := range args {
-		if len(a) > 1 && a[0] == '+' {
-			startSpec = a[1:]
-		} else if name == "" {
-			name = a
-		}
-	}
+	name, startSpecs := parseArgs(args)
 
 	b, newFile, err := openBuffer(name)
 	if err != nil {
@@ -179,8 +167,8 @@ func main() {
 
 	w, h := termSize(fd)
 	r := &repl{b: b, rd: newReader(), termW: w, termH: h, wrap: true}
-	if startSpec != "" {
-		if r.dispatch(startSpec) {
+	for _, spec := range startSpecs {
+		if r.dispatch(spec) {
 			return
 		}
 	}
@@ -189,8 +177,34 @@ func main() {
 
 // printUsage writes the command-line help shown by --help / -h. The in-editor
 // command and key reference lives behind the `h` command at the prompt.
+// parseArgs picks the file name and the startup specs out of the command line.
+//
+// A "+SPEC" argument (vim/less style) opens straight to a range: SPEC is any
+// prompt command — "+3.10", "+tail", "+$-20.$" — run once on startup so the
+// block is sitting above the prompt, as if it had been typed. The "+" marks it
+// unambiguously, so it works in any position and never collides with a file
+// named like an address.
+//
+// Several are allowed and they run left to right, which is what lets a view be
+// set up before the range is printed: "+csv +42" prints line 42 already in
+// columns. Order carries meaning, since the presets set knobs a later command
+// can turn back off — "+csv +headers off" and "+headers off +csv" do different
+// things. A bare "+" is a file name, not a spec.
+//
+// It is separate from main so the cases can be tested without a terminal.
+func parseArgs(args []string) (name string, specs []string) {
+	for _, a := range args {
+		if len(a) > 1 && a[0] == '+' {
+			specs = append(specs, a[1:])
+		} else if name == "" {
+			name = a
+		}
+	}
+	return name, specs
+}
+
 func printUsage() {
-	fmt.Print(`Usage: nved [+spec] [file]
+	fmt.Print(`Usage: nved [+spec ...] [file]
 
 A small REPL-flavored terminal text editor. Print a range of lines by number,
 climb into the printed block with Up / Left, and edit it in place. With no file
@@ -201,6 +215,10 @@ on startup:
   nved +42 notes.txt        open with line 42 printed
   nved +10.30 notes.txt     ... lines 10 through 30
   nved +tail notes.txt      ... the last screenful, ready to climb into
+
+Give more than one and they run left to right, so a view can be set up before
+the range is printed:
+  nved +csv +42 data.csv    line 42, already split into columns
 
 Flags:
   -h, --help      Show this help
