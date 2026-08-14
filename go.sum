@@ -1,5 +1,5 @@
-github.com/excelano/encsniff-go v0.1.0 h1:d6We0GAgSJCSDETArK2tSxKco1XyrZnpw8k70kAHCU0=
-github.com/excelano/encsniff-go v0.1.0/go.mod h1:5k9ijQKmg4Lp1hqmihMpMFNuTa/6yeR7VXqkIlAnx9k=
+github.com/excelano/encsniff-go v0.2.0 h1:sOOKzfcQthemxNL/nlqpiyGg8XldhfSPylPyThSrJYA=
+github.com/excelano/encsniff-go v0.2.0/go.mod h1:5k9ijQKmg4Lp1hqmihMpMFNuTa/6yeR7VXqkIlAnx9k=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
 golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/term v0.45.0 h1:NwWyBmoJCbfTHpxrWoZ9C6/VxOf7ic219I8xZZFdrf0=

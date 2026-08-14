@@ -23,11 +23,24 @@ import (
 // the BOM on save. Sniff failures are silently ignored.
 func sniffAndWarn(path string) string {
 	s, err := encsniff.SniffFile(path)
-	if err != nil || s.Action != encsniff.Warn {
+	if err != nil || !s.IsWarning() {
 		return ""
 	}
-	fmt.Fprintf(os.Stderr, "nved: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	// Two shapes of warning. A signature match can name the encoding; a window
+	// that is merely not valid UTF-8 cannot, and saying so plainly beats the old
+	// behaviour, which called the file usable and let the read fail later.
+	if s.Encoding != "" {
+		fmt.Fprintf(os.Stderr, "nved: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	} else {
+		fmt.Fprintf(os.Stderr, "nved: warning: %s is not valid UTF-8, and its encoding could not be identified.\n", path)
+	}
 	fmt.Fprintf(os.Stderr, "hint: %s\n", s.Hint)
+	// The caller stores this to make save refuse to overwrite silently, so an
+	// unnameable encoding has to return something non-empty: the file still
+	// must not be written back as if it were UTF-8.
+	if s.Encoding == "" {
+		return "an unidentified non-UTF-8 encoding"
+	}
 	return string(s.Encoding)
 }
 
