@@ -275,11 +275,11 @@ git config --global core.editor "nved +."
 ```
 
 nved drives the terminal in raw mode, so it fits the `VISUAL` slot — the
-full-screen editor — rather than `EDITOR`, the line-editor fallback some tools
-reach for when there is no usable terminal. If you want that slot filled too,
-[ved](https://github.com/excelano/ved) is the natural companion: an `ed`-style
-line editor that reads commands a line at a time, which is exactly what `EDITOR`
-is meant to name.
+interactive, cursor-driven editor — rather than `EDITOR`, the line-editor fallback
+some tools reach for when there is no usable terminal. If you want the `EDITOR`
+slot filled too, [ved](https://github.com/excelano/ved) is the natural companion:
+an `ed`-style line editor that reads commands a line at a time, which is what
+`EDITOR` is meant to name.
 
 ```sh
 export EDITOR=ved
