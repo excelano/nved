@@ -9,8 +9,8 @@ This file carries what is true of nved and not of its siblings.
 |---|---|
 | Loop | goreleaser |
 | `apt-ship` argument | `nved` |
-| winget package | `Excelano.nved` |
-| Windows assets | `nved_<version>_windows_amd64.zip` **and** `nved_<version>_windows_arm64.zip` |
+| Packages per release | 2, amd64 arm64 |
+| winget package | `Excelano.nved` — `nved_<version>_windows_amd64.zip` `nved_<version>_windows_arm64.zip` |
 
 **The release builds** platform archives for Linux, macOS, and Windows on both
 architectures, the two `.deb` packages, `checksums.txt`, the Homebrew formula,
