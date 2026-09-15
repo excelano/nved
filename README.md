@@ -44,20 +44,6 @@ Then install it, so `brew upgrade` keeps it current:
 brew install nved
 ```
 
-### Prebuilt binary (Linux and macOS, x86_64 and arm64)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/install.sh | sh
-```
-
-If the installer needs to write to a root-owned directory like `/usr/local/bin` (typical when upgrading a previously sudo-installed copy), wrap `sh`, not `curl`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/install.sh | sudo sh
-```
-
-Pin a version with `NVED_VERSION=v1.2.1`, or install elsewhere with `NVED_INSTALL_DIR=$HOME/bin`. To uninstall: `curl -fsSL https://raw.githubusercontent.com/excelano/nved/main/uninstall.sh | sh` (or `sudo apt remove nved` if installed via apt).
-
 ### Windows
 
 With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current:
