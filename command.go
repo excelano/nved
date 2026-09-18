@@ -308,8 +308,10 @@ EDITING — climb into the printed block to change it
   move         arrows; Ctrl+Left / Ctrl+Right by word (by field when aligned)
   jump         Home / End to line ends; Ctrl+Home / Ctrl+End to buffer ends
   change       type to insert; Enter splits a line; Backspace / Delete join
+  type lines   append [N] / a — type lines after N, a lone . ends (Ctrl+C cancels)
   add a row    insert row [N] / ir — blank line after N (bare appends, 0 prepends)
-  kill rows    kill row N / kr — delete line N or an N.M range (a range confirms)
+  delete       delete N / d — remove line N or an N.M range (a range confirms)
+               kill row N / kr is the same command under the insert/kill names
   undo         Ctrl+U — also at the prompt, and across climbing in and out
   leave        Esc, Ctrl+C, or step off the bottom (Down) or the end (Right)
 
@@ -345,6 +347,7 @@ DELIMITED VIEW — opt-in; a file opens as plain text until you ask
   In an aligned block, Tab / Shift-Tab move field to field and the grid
   re-aligns as you type. Editing changes the field value only — the delimiter
   (it is data inside a "quoted" cell) and mid-cell Enter-split are suppressed;
-  use insert / kill row and column for structure, or dsv off.
+  use append / delete, insert row and the column commands for structure, or
+  dsv off.
 `)
 }

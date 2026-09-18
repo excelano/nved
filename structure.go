@@ -6,26 +6,37 @@ import (
 	"strings"
 )
 
-// The structural layer: insert and kill whole rows and columns. A column op
+// The structural layer: add and remove whole lines and columns. A column op
 // rewrites every record (split into raw cells, add or remove one, rejoin verbatim
-// with the delimiter, so a quoted field round-trips); a row op splices the line
+// with the delimiter, so a quoted field round-trips); a line op splices the line
 // slice. Columns are dsv-only and carry no on-screen address — lines have a gutter
 // number, columns don't — so a column is named by a spreadsheet letter (A, B, …),
-// surfaced on demand by the `columns` letter ruler. Rows ARE the primary axis and
+// surfaced on demand by the `columns` letter ruler. Lines ARE the primary axis and
 // already carry gutter numbers, so they need no ruler and work in plain text and DSV
 // alike — in aligned view a row insert adds a well-formed empty record rather than
 // re-enabling the unsafe mid-field Enter-split the cell editor suppresses.
 //
-// The verb leads the command — `insert column` / `kill row` — so the short forms
-// are ic / kc / ir / kr, whose initials stay clear of the f / r / c verb families
-// (find, replace, columns) where ri / ci would have blurred. No chords in v1:
-// every mnemonic key was taken (Insert is eaten as Copy, Ctrl+I *is* Tab).
+// Two command shapes sit here. `insert row` / `insert column` / `kill row` /
+// `kill column` lead with the verb and name their axis, so the short forms are
+// ir / ic / kr / kc, whose initials stay clear of the f / r / c verb families
+// (find, replace, columns) where ri / ci would have blurred. `append` / `a` and
+// `delete` / `d` keep ved's names and name no axis, their argument being a line
+// number, which says on its own what it addresses — where a column letter needs
+// the noun to say which ruler to read it against. Removing a line answers to
+// both shapes: `delete` / `d` and `kill row` / `kr` are one handler under two
+// names, the short one to type and the long one to keep the insert/kill family
+// whole. `a` is the one command here that supplies text rather than making room
+// for it — `insert row` opens a blank row to climb into, a well-formed empty
+// record in a delimited view, while `a` takes a block of lines at the prompt,
+// and with it the paste that nved has no other path for. No chords: every
+// mnemonic key was taken (Insert is eaten as Copy, Ctrl+I *is* Tab).
 
 // structDispatch handles the structural family — insert / kill of a row or column,
-// the short forms ic / kc / ir / kr, and the bare nouns (columns / c prints the
-// letter ruler, rows reports the line count) — and reports whether s was one so the
-// main dispatch falls through to address parsing when it isn't. It manages r.last
-// itself: a report or a successful edit reprints a block, an error clears it.
+// append and delete, the short forms ir / kr / ic / kc / a / d, and the bare nouns
+// (columns / c prints the letter ruler, rows reports the line count) — and reports
+// whether s was one so the main dispatch falls through to address parsing when it
+// isn't. It manages r.last itself: a report or a successful edit reprints a block,
+// an error clears it.
 func (r *repl) structDispatch(s string) bool {
 	// Short forms first — own tokens, like fn / rn.
 	if rest, ok := cutVerb(s, "ic"); ok {
@@ -41,7 +52,18 @@ func (r *repl) structDispatch(s string) bool {
 		return true
 	}
 	if rest, ok := cutVerb(s, "kr"); ok {
-		r.killRow(strings.TrimSpace(rest))
+		r.deleteLines(strings.TrimSpace(rest))
+		return true
+	}
+	// append and delete take no noun: a line number says on its own what is being
+	// added to or removed, where a column has to be named by letter and needs the
+	// noun to say which axis the address is in.
+	if rest, ok := cutVerb(s, "a", "append"); ok {
+		r.appendRows(strings.TrimSpace(rest))
+		return true
+	}
+	if rest, ok := cutVerb(s, "d", "delete"); ok {
+		r.deleteLines(strings.TrimSpace(rest))
 		return true
 	}
 	// Long forms: insert <noun> [arg] / kill <noun> <arg>.
@@ -65,7 +87,8 @@ func (r *repl) structDispatch(s string) bool {
 
 // structVerb routes insert / kill to the row or column handler by its noun
 // (singular or plural accepted). A missing or unknown noun is reported with a
-// nudge, since the verb on its own is ambiguous.
+// nudge, since the verb on its own is ambiguous. `kill row` lands on deleteLines,
+// the same place `delete` does.
 func (r *repl) structVerb(verb, rest string) bool {
 	noun, arg := firstWord(rest)
 	switch noun {
@@ -79,7 +102,7 @@ func (r *repl) structVerb(verb, rest string) bool {
 		if verb == "insert" {
 			r.insertRow(arg)
 		} else {
-			r.killRow(arg)
+			r.deleteLines(arg)
 		}
 	case "":
 		emitf("nved: %s needs a target — %s row or %s column\n", verb, verb, verb)
@@ -426,34 +449,34 @@ func (r *repl) insertRow(arg string) {
 	r.reprintFrom(pos + 1)
 }
 
-// killRow deletes a line or an inclusive range, addressed the same way the print
-// commands are (N, N.M, $, $-k) so a range delete reuses parseAddress. A single
-// line goes without ceremony; a range confirms first, since it is the more
-// destructive form. The buffer always keeps at least one line, so killing every
+// deleteLines removes a line or an inclusive range, addressed the same way the
+// print commands are (N, N.M, $, $-k) so a range delete reuses parseAddress. A
+// single line goes without ceremony; a range confirms first, since it is the more
+// destructive form. The buffer always keeps at least one line, so deleting every
 // line is refused. The removed lines are captured for a one-step undo.
-func (r *repl) killRow(arg string) {
+func (r *repl) deleteLines(arg string) {
 	n := len(r.b.lines)
 	if arg == "" {
-		emit("rows: kill needs a line number or range — type rows for the count\n")
+		emit("rows: delete needs a line number or range — type rows for the count\n")
 		r.last = nil
 		return
 	}
 	start, end, ok := parseAddress(arg, n)
 	if !ok {
-		emitf("rows: kill takes a line number or range, not %q\n", arg)
+		emitf("rows: delete takes a line number or range, not %q\n", arg)
 		r.last = nil
 		return
 	}
 	count := end - start + 1
 	if count >= n {
-		emitf("rows: can't kill all %d lines — the buffer keeps at least one\n", n)
+		emitf("rows: can't delete all %d lines — the buffer keeps at least one\n", n)
 		r.last = nil
 		return
 	}
 	if count > 1 {
-		ans, ok := readLine(r.rd, fmt.Sprintf("kill lines %d-%d (%d lines)? [y/N] ", start, end, count))
+		ans, ok := readLine(r.rd, fmt.Sprintf("delete lines %d-%d (%d lines)? [y/N] ", start, end, count))
 		if !ok || !isYes(ans) {
-			emit("rows: kill cancelled\n")
+			emit("rows: delete cancelled\n")
 			r.last = nil
 			return
 		}
@@ -483,7 +506,7 @@ func (r *repl) killRow(arg string) {
 	if count > 1 {
 		word = "lines"
 	}
-	emit(faint(fmt.Sprintf("rows: killed %d %s", count, word)) + "\n")
+	emit(faint(fmt.Sprintf("rows: deleted %d %s", count, word)) + "\n")
 	r.reprintFrom(start)
 }
 
@@ -524,4 +547,97 @@ func isYes(s string) bool {
 		return true
 	}
 	return false
+}
+
+// --- append ----------------------------------------------------------------
+
+// appendRows reads typed lines and splices them into the buffer, ved's `a` and
+// the only command that enters text as text: `insert row` opens one blank row to
+// climb into, while this takes a whole block at once. It is also the paste path,
+// since a pasted block arrives as ordinary line-at-a-time input. Addressing
+// matches insertRow — a bare arg appends after the last line, a number N appends
+// after line N, and 0 prepends. Input ends at a lone "." (ved's terminator, so a
+// line that is nothing but a period cannot be typed this way) and Ctrl+C discards
+// the whole block, the same cancel the save and confirm prompts use. However many
+// lines are typed, the splice is a single undo.
+func (r *repl) appendRows(arg string) {
+	n := len(r.b.lines)
+	pos := n // 0-based index to insert AT; after the last line == append
+	if arg != "" {
+		m, err := strconv.Atoi(arg)
+		if err != nil || m < 0 {
+			emitf("rows: append takes a line number (0 to prepend), not %q\n", arg)
+			r.last = nil
+			return
+		}
+		pos = clamp(m, 0, n) // "after line m" is the 0-based index m
+	}
+	added, ok := r.readAppendLines(pos)
+	if !ok {
+		emit("rows: append cancelled\n")
+		r.last = nil
+		return
+	}
+	if len(added) == 0 {
+		emit("rows: nothing appended\n")
+		r.last = nil
+		return
+	}
+	count := len(added)
+	preMod := r.b.modified
+	lines := make([]string, 0, n+count)
+	lines = append(lines, r.b.lines[:pos]...)
+	lines = append(lines, added...)
+	lines = append(lines, r.b.lines[pos:]...)
+	r.b.lines = lines
+	r.b.modified = true
+	r.b.pushUndo(undoEntry{
+		apply: func(b *buffer) {
+			out := make([]string, 0, len(b.lines)-count)
+			out = append(out, b.lines[:pos]...)
+			out = append(out, b.lines[pos+count:]...)
+			b.lines = out
+			b.modified = preMod
+		},
+		line:      pos,
+		col:       0,
+		lineDelta: -count, // undo removes the appended lines
+	})
+	word := "line"
+	if count > 1 {
+		word = "lines"
+	}
+	var msg string
+	switch {
+	case pos == 0:
+		msg = fmt.Sprintf("rows: prepended %d %s", count, word)
+	case pos == n:
+		msg = fmt.Sprintf("rows: appended %d %s", count, word)
+	default:
+		msg = fmt.Sprintf("rows: appended %d %s after line %d", count, word, pos)
+	}
+	emit(faint(msg) + "\n")
+	r.reprintFrom(pos + 1)
+}
+
+// readAppendLines reads the typed block for an append, echoing each line behind
+// the faint gutter number it will carry once committed: pos is the 0-based
+// insertion point, so the first line is numbered pos+1 and they count up from
+// there, the same gutter a printed block draws. ok is false when input was
+// cancelled with Ctrl+C or ran out, which discards everything typed; a lone "."
+// ends input and commits. The gutter is sized to the buffer as it stands, so a
+// long append can outgrow it by a column — it is an input echo, not a block
+// render, and the reprint that follows sizes the gutter properly.
+func (r *repl) readAppendLines(pos int) (added []string, ok bool) {
+	w := r.gutterW()
+	for {
+		line, got := readLine(r.rd, gutterPrefix(w, pos+len(added)+1))
+		if !got {
+			return nil, false
+		}
+		if line == "." {
+			return added, true
+		}
+		added = append(added, line)
+	}
 }

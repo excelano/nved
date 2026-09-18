@@ -137,11 +137,34 @@ The printed block sits just above the prompt. Climb into it to edit:
 - **Ctrl+S** saves in place without leaving (your cursor stays put); **Ctrl+X** exits — the save and exit chords work while editing, just as at the prompt.
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 
-Two structural edits are typed at the prompt rather than done with the cursor:
-`insert row [N]` — short `ir` — opens a blank line after line N (a bare `insert
-row` appends at the end, `0` prepends), and `kill row N` (`kr`) deletes line N, or
-an `N.M` range. Deleting a range asks first; deleting a single line does not. Both
-are a single **Ctrl+U** undo, and a bare `rows` reports the line count.
+Three structural edits are typed at the prompt rather than done with the cursor.
+`append [N]` — short `a`, taken from ved — reads the lines you type and adds them
+after line N, one per Enter, until a line that is nothing but a period ends the
+run:
+
+```
+> a 12
+  13  first new line
+  14  second
+  15  .
+rows: appended 2 lines after line 12
+```
+
+The faint number ahead of each line is the one it will carry once committed.
+**Ctrl+C** discards everything typed. A bare `append` adds the lines at the end and
+`0` prepends, the same addressing the other row commands take, and because the
+input is read a line at a time, pasting a block of text into the terminal arrives
+the same way — the one path into nved for text you did not type by hand. The
+terminator brings ved's limitation with it: a line that is only a period cannot
+be entered this way.
+
+`delete N` — short `d`, also from ved — removes line N, or an `N.M` range, and
+answers to `kill row N` (`kr`) as well, the spelling that names its axis the way
+the column commands do. Deleting a range asks first; deleting a single line does
+not. `insert row [N]` — short `ir` — opens a single blank line after line N to
+climb into, which in a delimited view is a well-formed empty record with one
+field per column. Each of the three is a single **Ctrl+U** undo however many
+lines it moved, and a bare `rows` reports the line count.
 
 Long lines are word-wrapped by nved itself, with a continuation indent that lines
 the wrapped text up under the gutter. `wrap off` turns that off: each line then
@@ -230,10 +253,12 @@ Columns have no line number, so `columns` (or `c`) prints a faint letter ruler a
 the grid, labelling them `A`, `B`, `C`… from the left the way a spreadsheet does;
 `insert column [L]` — short `ic` — adds an empty column before column L (a bare
 `insert column` appends, `ic A` prepends), and `kill column L` (`kc`) removes column
-L from every row after a confirmation, naming the column when headers are on. Row insert and delete —
-`insert row` / `ir` and `kill row` / `kr`, described above — work here too, the row
-insert carrying one empty field per column so it lines up. Each column or row edit
-is a single undo; for free-form restructuring, `dsv off` returns to plain text.
+L from every row after a confirmation, naming the column when headers are on. Row insert and
+delete — `insert row` / `ir` and `kill row` / `kr`, described above — work here
+too, the row insert carrying one empty field per column so it lines up. `append` takes
+raw record text rather than cells, so you type the delimiters yourself and the
+new rows align once they land. Each column or row edit is a single undo; for
+free-form restructuring, `dsv off` returns to plain text.
 
 A quoted field keeps its quotes on screen and on save, so you always see which
 cells are quoted and which aren't.

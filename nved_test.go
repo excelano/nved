@@ -2013,21 +2013,21 @@ func TestRowsInsertAppendPrependAndShape(t *testing.T) {
 	}
 }
 
-func TestRowsKillSingleNoConfirm(t *testing.T) {
+func TestLinesDeleteSingleNoConfirm(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"one", "two", "three"}, 80, 24)
-	r.structDispatch("kr 2") // a single line: no confirm
+	r.structDispatch("d 2") // a single line: no confirm
 	if !reflect.DeepEqual(r.b.lines, []string{"one", "three"}) {
-		t.Fatalf("kr 2 -> %q", r.b.lines)
+		t.Fatalf("d 2 -> %q", r.b.lines)
 	}
 	r.undoAtPrompt()
 	if !reflect.DeepEqual(r.b.lines, []string{"one", "two", "three"}) {
-		t.Errorf("undo of kr -> %q", r.b.lines)
+		t.Errorf("undo of d -> %q", r.b.lines)
 	}
 }
 
-func TestRowsKillRangeConfirmed(t *testing.T) {
+func TestLinesDeleteRangeConfirmed(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"1", "2", "3", "4", "5"}, 80, 24)
@@ -2035,13 +2035,31 @@ func TestRowsKillRangeConfirmed(t *testing.T) {
 	pw.WriteString("y\r")
 	pw.Close()
 	r.rd = newReaderFrom(pr)
-	r.structDispatch("kill row 2.4") // a range: confirms, reuses parseAddress
+	r.structDispatch("delete 2.4") // a range: confirms, reuses parseAddress
 	if !reflect.DeepEqual(r.b.lines, []string{"1", "5"}) {
-		t.Fatalf("kill row 2.4 (confirmed) -> %q", r.b.lines)
+		t.Fatalf("delete 2.4 (confirmed) -> %q", r.b.lines)
 	}
 }
 
-func TestRowsKillRangeCancelled(t *testing.T) {
+// TestKillRowIsDelete drives the long and short insert/kill spellings, which are
+// the same handler as delete / d.
+func TestKillRowIsDelete(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"one", "two", "three"}, 80, 24)
+	if !r.structDispatch("kr 2") {
+		t.Fatal("kr 2 should be a structural command")
+	}
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "three"}) {
+		t.Fatalf("kr 2 -> %q", r.b.lines)
+	}
+	r.structDispatch("kill row 2")
+	if !reflect.DeepEqual(r.b.lines, []string{"one"}) {
+		t.Fatalf("kill row 2 -> %q", r.b.lines)
+	}
+}
+
+func TestLinesDeleteRangeCancelled(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"1", "2", "3", "4"}, 80, 24)
@@ -2049,13 +2067,13 @@ func TestRowsKillRangeCancelled(t *testing.T) {
 	pw.WriteString("n\r")
 	pw.Close()
 	r.rd = newReaderFrom(pr)
-	r.structDispatch("kr 2.3")
+	r.structDispatch("d 2.3")
 	if !reflect.DeepEqual(r.b.lines, []string{"1", "2", "3", "4"}) {
 		t.Errorf("a cancelled range kill must change nothing, got %q", r.b.lines)
 	}
 }
 
-func TestRowsKillRefusesAll(t *testing.T) {
+func TestLinesDeleteRefusesAll(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"only", "two"}, 80, 24)
@@ -2063,9 +2081,9 @@ func TestRowsKillRefusesAll(t *testing.T) {
 	pw.WriteString("y\r")
 	pw.Close()
 	r.rd = newReaderFrom(pr)
-	r.structDispatch("kr 1.2") // would empty the buffer — refused before the confirm
+	r.structDispatch("d 1.2") // would empty the buffer — refused before the confirm
 	if !reflect.DeepEqual(r.b.lines, []string{"only", "two"}) {
-		t.Errorf("killing every line must be refused, got %q", r.b.lines)
+		t.Errorf("deleting every line must be refused, got %q", r.b.lines)
 	}
 }
 
@@ -2086,7 +2104,7 @@ func TestStructDispatchFallThrough(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	r := newRepl([]string{"hello"}, 80, 24)
-	for _, s := range []string{"csv", "clear", "category", "insertion", "killer", "5.10", "5"} {
+	for _, s := range []string{"csv", "asv", "clear", "category", "appended", "all", "deleted", "done", "insertion", "killer", "5.10", "5"} {
 		if r.structDispatch(s) {
 			t.Errorf("%q should not match structDispatch", s)
 		}
@@ -2167,5 +2185,131 @@ func TestReplaceNextZeroWidthTerminates(t *testing.T) {
 	}
 	if r.search != nil {
 		t.Fatalf("zero-width empty replacement should terminate, still armed after %d steps: %+v", steps, r.search)
+	}
+}
+
+// --- append ----------------------------------------------------------------
+
+// appendRepl builds a repl whose reader replays typed input, so an append can be
+// driven end to end: each line is terminated the way a terminal sends Enter.
+func appendRepl(lines []string, typed ...string) *repl {
+	r := newRepl(lines, 80, 24)
+	pr, pw, _ := os.Pipe()
+	go func() {
+		for _, s := range typed {
+			pw.WriteString(s + "\r")
+		}
+		pw.Close()
+	}()
+	r.rd = newReaderFrom(pr)
+	return r
+}
+
+func TestAppendAfterLine(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := appendRepl([]string{"one", "two", "three"}, "new a", "new b", ".")
+	if !r.structDispatch("a 1") {
+		t.Fatal("a 1 should be a structural command")
+	}
+	want := []string{"one", "new a", "new b", "two", "three"}
+	if !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("a 1 -> %q, want %q", r.b.lines, want)
+	}
+	if !r.b.modified {
+		t.Error("an append should mark the buffer modified")
+	}
+	// However many lines were typed, the splice is one undo.
+	r.undoAtPrompt()
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two", "three"}) {
+		t.Errorf("undo of a -> %q", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("undo should restore the unmodified flag")
+	}
+}
+
+func TestAppendBarePrependAndLongForm(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	// Bare: after the last line.
+	r := appendRepl([]string{"a", "b"}, "end", ".")
+	r.structDispatch("a")
+	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", "end"}) {
+		t.Fatalf("bare a -> %q", r.b.lines)
+	}
+	// 0 prepends.
+	r = appendRepl([]string{"a", "b"}, "top", ".")
+	r.structDispatch("a 0")
+	if !reflect.DeepEqual(r.b.lines, []string{"top", "a", "b"}) {
+		t.Fatalf("a 0 -> %q", r.b.lines)
+	}
+	// The long form is the same command.
+	r = appendRepl([]string{"a", "b"}, "x", ".")
+	r.structDispatch("append 1")
+	if !reflect.DeepEqual(r.b.lines, []string{"a", "x", "b"}) {
+		t.Fatalf("append 1 -> %q", r.b.lines)
+	}
+	// An out-of-range line number clamps to the end, as the print commands do.
+	r = appendRepl([]string{"a", "b"}, "x", ".")
+	r.structDispatch("a 99")
+	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", "x"}) {
+		t.Fatalf("a 99 -> %q", r.b.lines)
+	}
+}
+
+func TestAppendCancelAndEmpty(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	// Ctrl+C (0x03) discards everything typed before it.
+	r := newRepl([]string{"one", "two"}, 80, 24)
+	pr, pw, _ := os.Pipe()
+	go func() {
+		pw.WriteString("typed\r\x03")
+		pw.Close()
+	}()
+	r.rd = newReaderFrom(pr)
+	r.structDispatch("a 1")
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two"}) {
+		t.Errorf("a cancelled append must change nothing, got %q", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("a cancelled append must not mark the buffer modified")
+	}
+	// An immediate terminator adds nothing and records no undo.
+	r = appendRepl([]string{"one", "two"}, ".")
+	r.structDispatch("a 1")
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two"}) {
+		t.Errorf("an empty append -> %q", r.b.lines)
+	}
+	if len(r.b.undos) != 0 {
+		t.Error("an empty append must record no undo")
+	}
+}
+
+func TestAppendRejectsBadAddress(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := appendRepl([]string{"one"}, "never read", ".")
+	r.last = &block{start: 1, count: 1}
+	r.structDispatch("a $")
+	if !reflect.DeepEqual(r.b.lines, []string{"one"}) {
+		t.Errorf("a bad append address must change nothing, got %q", r.b.lines)
+	}
+	if r.last != nil {
+		t.Error("an append error should clear r.last")
+	}
+}
+
+// TestAppendTakesDelimitedText appends raw record text in a delimited view: the
+// typed line is the record, not a cell, so a comma is data the row splits on.
+func TestAppendTakesDelimitedText(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := appendRepl([]string{"x,y,z", "1,2,3"}, "4,5,6", ".")
+	r.delim, r.quotes, r.headers = ',', true, true
+	r.structDispatch("a")
+	if !reflect.DeepEqual(r.b.lines, []string{"x,y,z", "1,2,3", "4,5,6"}) {
+		t.Fatalf("delimited append -> %q", r.b.lines)
 	}
 }
