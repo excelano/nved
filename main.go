@@ -97,6 +97,12 @@ type repl struct {
 	// reads "find next" with the cursor after it and Enter steps to the following
 	// match. The chord seeds it too. Consumed (cleared) the moment it is echoed.
 	pendingLine string
+
+	// pendingCmd is a command line to run the moment the current one finishes, the
+	// way a chord pressed inside a command's own input reaches the command layer:
+	// Ctrl+S / Ctrl+X during an append end the block and leave "s" / "x" here, so
+	// the save or exit runs the same path the typed word does. Drained by dispatch.
+	pendingCmd string
 }
 
 // block records a printed range so a later climb knows where on screen the

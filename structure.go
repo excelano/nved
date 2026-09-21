@@ -557,9 +557,10 @@ func isYes(s string) bool {
 // since a pasted block arrives as ordinary line-at-a-time input. Addressing
 // matches insertRow — a bare arg appends after the last line, a number N appends
 // after line N, and 0 prepends. Input ends at a lone "." (ved's terminator, so a
-// line that is nothing but a period cannot be typed this way) and Ctrl+C discards
-// the whole block, the same cancel the save and confirm prompts use. However many
-// lines are typed, the splice is a single undo.
+// line that is nothing but a period cannot be typed this way), or at Ctrl+S /
+// Ctrl+X, which commit the block and then save or exit; Ctrl+C discards the whole
+// block, the same cancel the save and confirm prompts use. However many lines are
+// typed, the splice is a single undo.
 func (r *repl) appendRows(arg string) {
 	n := len(r.b.lines)
 	pos := n // 0-based index to insert AT; after the last line == append
@@ -572,12 +573,16 @@ func (r *repl) appendRows(arg string) {
 		}
 		pos = clamp(m, 0, n) // "after line m" is the 0-based index m
 	}
-	added, ok := r.readAppendLines(pos)
+	added, after, ok := r.readAppendLines(pos)
 	if !ok {
 		emit("rows: append cancelled\n")
 		r.last = nil
 		return
 	}
+	// A chord ended the block: its command runs once this one is done, whether or
+	// not anything was typed — Ctrl+X out of an append the user thought better of
+	// still means exit.
+	r.pendingCmd = after
 	if len(added) == 0 {
 		emit("rows: nothing appended\n")
 		r.last = nil
@@ -625,19 +630,34 @@ func (r *repl) appendRows(arg string) {
 // insertion point, so the first line is numbered pos+1 and they count up from
 // there, the same gutter a printed block draws. ok is false when input was
 // cancelled with Ctrl+C or ran out, which discards everything typed; a lone "."
-// ends input and commits. The gutter is sized to the buffer as it stands, so a
-// long append can outgrow it by a column — it is an input echo, not a block
-// render, and the reprint that follows sizes the gutter properly.
-func (r *repl) readAppendLines(pos int) (added []string, ok bool) {
+// ends input and commits. Ctrl+S and Ctrl+X end it too, keeping the half-typed
+// line they land on, and name the command to run once the block is in — "s" or
+// "x" in after, empty when a "." ended the run — so the chord that saves or
+// exits everywhere else does it from inside an append as well. The gutter is
+// sized to the buffer as it stands, so a long append can outgrow it by a column
+// — it is an input echo, not a block render, and the reprint that follows sizes
+// the gutter properly.
+func (r *repl) readAppendLines(pos int) (added []string, after string, ok bool) {
 	w := r.gutterW()
+	stop := []keyKind{keyCtrlS, keyCtrlX}
 	for {
-		line, got := readLine(r.rd, gutterPrefix(w, pos+len(added)+1))
-		if !got {
-			return nil, false
+		line, end := readLineStopping(r.rd, gutterPrefix(w, pos+len(added)+1), stop)
+		switch end {
+		case keyCtrlS, keyCtrlX:
+			if line != "" {
+				added = append(added, line)
+			}
+			if end == keyCtrlS {
+				return added, "s", true
+			}
+			return added, "x", true
+		case keyEnter:
+			if line == "." {
+				return added, "", true
+			}
+			added = append(added, line)
+		default: // Ctrl+C, or input ran out
+			return nil, "", false
 		}
-		if line == "." {
-			return added, true
-		}
-		added = append(added, line)
 	}
 }

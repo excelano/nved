@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -295,21 +296,36 @@ func (rd *reader) readUTF8(lead byte) key {
 // readLine reads a plain line for a prompt (e.g. the filename ask), echoing as
 // it goes. ok is false when cancelled with Ctrl+C or at end of input.
 func readLine(rd *reader, prompt string) (string, bool) {
+	line, end := readLineStopping(rd, prompt, nil)
+	return line, end == keyEnter
+}
+
+// readLineStopping is readLine with extra terminators: any key kind in stop ends
+// the line where Enter would, keeping what was typed, and the kind that ended it
+// is returned — keyEnter for an ordinary line, keyCtrlC for a cancel, keyUnknown
+// at end of input. An append reads its block through here so Ctrl+S and Ctrl+X
+// can end it; the plain prompts pass no stop keys, which leaves those chords
+// swallowed there as every other unhandled key is.
+func readLineStopping(rd *reader, prompt string, stop []keyKind) (string, keyKind) {
 	os.Stdout.WriteString(prompt)
 	var line []rune
 	for {
 		k, ok := rd.readKey()
 		if !ok {
 			os.Stdout.WriteString("\r\n")
-			return "", false
+			return "", keyUnknown
+		}
+		if slices.Contains(stop, k.kind) {
+			os.Stdout.WriteString("\r\n")
+			return string(line), k.kind
 		}
 		switch k.kind {
 		case keyCtrlC:
 			os.Stdout.WriteString("\r\n")
-			return "", false
+			return "", keyCtrlC
 		case keyEnter:
 			os.Stdout.WriteString("\r\n")
-			return string(line), true
+			return string(line), keyEnter
 		case keyBackspace:
 			if len(line) > 0 {
 				line = line[:len(line)-1]

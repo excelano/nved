@@ -151,12 +151,14 @@ rows: appended 2 lines after line 12
 ```
 
 The faint number ahead of each line is the one it will carry once committed.
-**Ctrl+C** discards everything typed. A bare `append` adds the lines at the end and
-`0` prepends, the same addressing the other row commands take, and because the
-input is read a line at a time, pasting a block of text into the terminal arrives
-the same way — the one path into nved for text you did not type by hand. The
-terminator brings ved's limitation with it: a line that is only a period cannot
-be entered this way.
+**Ctrl+C** discards everything typed, and the period is one way to end a block
+rather than the only one: **Ctrl+S** ends the run and saves the file, **Ctrl+X**
+ends it and exits, both keeping the line you are part way through typing. A bare
+`append` adds the lines at the end and `0` prepends, the same addressing the
+other row commands take, and because the input is read a line at a time, pasting
+a block of text into the terminal arrives the same way — the one path into nved
+for text you did not type by hand. The terminator brings ved's limitation with
+it: a line that is only a period cannot be entered this way.
 
 `delete N` — short `d`, also from ved — removes line N, or an `N.M` range, and
 answers to `kill row N` (`kr`) as well, the spelling that names its axis the way

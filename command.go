@@ -17,11 +17,25 @@ func emitf(format string, a ...any) {
 	emit(fmt.Sprintf(format, a...))
 }
 
-// dispatch runs a single command line and returns true when nved should quit.
+// dispatch runs a command line, then whatever that command queued behind itself
+// in pendingCmd (an append ended with Ctrl+S or Ctrl+X leaves the save or exit
+// there), and returns true when nved should quit.
+func (r *repl) dispatch(line string) bool {
+	quit := r.runLine(line)
+	for !quit && r.pendingCmd != "" {
+		next := r.pendingCmd
+		r.pendingCmd = ""
+		quit = r.runLine(next)
+	}
+	r.pendingCmd = ""
+	return quit
+}
+
+// runLine runs a single command line and returns true when nved should quit.
 // Anything that prints below the block (a save notice, help, an error, an exit
 // warning) clears r.last, since the block is no longer the thing directly above
 // the prompt and a climb key would land on the wrong rows.
-func (r *repl) dispatch(line string) bool {
+func (r *repl) runLine(line string) bool {
 	b := r.b
 	s := strings.TrimSpace(line)
 	if name, ok := saveArg(s); ok {
@@ -308,7 +322,8 @@ EDITING — climb into the printed block to change it
   move         arrows; Ctrl+Left / Ctrl+Right by word (by field when aligned)
   jump         Home / End to line ends; Ctrl+Home / Ctrl+End to buffer ends
   change       type to insert; Enter splits a line; Backspace / Delete join
-  type lines   append [N] / a — type lines after N, a lone . ends (Ctrl+C cancels)
+  type lines   append [N] / a — type lines after N; a lone . ends the run,
+               Ctrl+S ends and saves, Ctrl+X ends and exits, Ctrl+C cancels
   add a row    insert row [N] / ir — blank line after N (bare appends, 0 prepends)
   delete       delete N / d — remove line N or an N.M range (a range confirms)
                kill row N / kr is the same command under the insert/kill names

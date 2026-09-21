@@ -2287,6 +2287,66 @@ func TestAppendCancelAndEmpty(t *testing.T) {
 	}
 }
 
+// TestAppendEndsOnSaveChord: Ctrl+S ends the block, keeps the half-typed line it
+// lands on, and queues the save to run once the splice is in — here against a
+// named buffer, so the file on disk carries the appended lines.
+func TestAppendEndsOnSaveChord(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	p := filepath.Join(t.TempDir(), "f.txt")
+	r := newRepl([]string{"one", "two"}, 80, 24)
+	r.b.name = p
+	pr, pw, _ := os.Pipe()
+	go func() {
+		pw.WriteString("new a\rhalf typed\x13")
+		pw.Close()
+	}()
+	r.rd = newReaderFrom(pr)
+	if quit := r.dispatch("a"); quit {
+		t.Fatal("Ctrl+S must not quit")
+	}
+	want := []string{"one", "two", "new a", "half typed"}
+	if !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("append ended with Ctrl+S -> %q, want %q", r.b.lines, want)
+	}
+	if r.pendingCmd != "" {
+		t.Errorf("dispatch left %q queued", r.pendingCmd)
+	}
+	if r.b.modified {
+		t.Error("the queued save should have cleared the modified flag")
+	}
+	saved, _, err := openBuffer(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.lines, want) {
+		t.Errorf("file holds %q, want %q", saved.lines, want)
+	}
+}
+
+// TestAppendEndsOnExitChord: Ctrl+X commits and then exits, which on a modified
+// buffer is the same warn-twice x takes at the prompt. An append the user thought
+// better of still exits: the chord runs even when nothing was typed.
+func TestAppendEndsOnExitChord(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := appendRepl([]string{"one", "two"}, "new a\x18")
+	if quit := r.dispatch("a"); quit {
+		t.Fatal("the first x on a modified buffer warns rather than quitting")
+	}
+	if want := []string{"one", "two", "new a"}; !reflect.DeepEqual(r.b.lines, want) {
+		t.Fatalf("append ended with Ctrl+X -> %q, want %q", r.b.lines, want)
+	}
+	if !r.b.exitArmed {
+		t.Error("the queued exit should have armed the unsaved-changes warning")
+	}
+	// Nothing typed, clean buffer: the chord still exits.
+	r = appendRepl([]string{"one"}, "\x18")
+	if quit := r.dispatch("a"); !quit {
+		t.Error("Ctrl+X out of an empty append should exit")
+	}
+}
+
 func TestAppendRejectsBadAddress(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
