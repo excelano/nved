@@ -342,7 +342,8 @@ SEARCH — find by content, then climb in and edit it (regexes, RE2)
 
 SESSION
   s [name]     save; a name is required when unnamed (also Ctrl+S)
-  x  q  quit   exit; warns once when there are unsaved edits (also Ctrl+X)
+  x  q  quit   exit; warns once when there are unsaved edits (also Ctrl+X,
+               and Ctrl+C, which at the prompt exits rather than cancels)
   h  ?         show this help
 
 DELIMITED VIEW — opt-in; a file opens as plain text until you ask

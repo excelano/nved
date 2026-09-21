@@ -128,7 +128,7 @@ const (
 	cmdPageUp                  // reprint the screenful above the block
 	cmdPageDown                // reprint the screenful below the block
 	cmdUndo                    // Ctrl+U at the prompt: undo the last edit
-	cmdQuit                    // Ctrl+C or end of input
+	cmdQuit                    // end of input: the terminal is gone, so nothing to ask
 )
 
 func main() {
@@ -303,8 +303,10 @@ func (r *repl) run() {
 }
 
 // readCommand reads one command line, echoing as it goes (ECHO is off in raw
-// mode). Ctrl+S and Ctrl+X resolve to their command strings so the chord and
-// the typed word share one dispatch path. On an empty command line with a block
+// mode). Ctrl+S, Ctrl+X and Ctrl+C resolve to their command strings so the chord
+// and the typed word share one dispatch path — Ctrl+C is an exit here, the only
+// place in nved it does not mean cancel, and it goes through the same warn-twice
+// gate as x rather than dropping unsaved edits on one keystroke. On an empty command line with a block
 // still below the prompt, a climb key (Up, Left, Ctrl+Home) returns a climb and
 // Page-Up/Page-Down return a page; every other navigation key is swallowed. On
 // an empty line Ctrl+U undoes the last edit, the same chord as in the editor;
@@ -336,7 +338,7 @@ func (r *repl) readCommand() cmdResult {
 		switch k.kind {
 		case keyCtrlC:
 			out("\r\n")
-			return cmdResult{kind: cmdQuit}
+			return cmdResult{kind: cmdSubmit, line: "x"}
 		case keyCtrlS:
 			out("\r\n")
 			return cmdResult{kind: cmdSubmit, line: "s"}

@@ -94,7 +94,7 @@ At the `>` prompt you address lines by number:
 | `head [N]` | print the first screenful, or the first N lines |
 | `tail [N]` | print the last screenful, or the last N lines |
 | `s [name]` | save; a name is required when unnamed (also `Ctrl+S`) |
-| `x`        | exit; warns once when dirty (also `Ctrl+X`, `q`, `quit`) |
+| `x`        | exit; warns once when dirty (also `Ctrl+X`, `Ctrl+C`, `q`, `quit`) |
 | `h`        | show the command and key reference (also `H`, `?`) |
 | `wrap on\|off` | word-wrap long lines, or show one per row and pan sideways |
 

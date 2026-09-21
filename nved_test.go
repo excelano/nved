@@ -270,6 +270,53 @@ func TestInterveningCommandDisarmsExit(t *testing.T) {
 	}
 }
 
+// promptRepl builds a repl whose reader replays keystrokes at the command
+// prompt, so run() can be driven to its exit.
+func promptRepl(lines []string, typed string) *repl {
+	r := newRepl(lines, 80, 24)
+	pr, pw, _ := os.Pipe()
+	go func() {
+		pw.WriteString(typed)
+		pw.Close()
+	}()
+	r.rd = newReaderFrom(pr)
+	return r
+}
+
+// TestPromptCtrlCExitsThroughTheWarning: at the prompt Ctrl+C is an exit, and it
+// takes the same warn-twice gate x does rather than dropping unsaved edits on one
+// keystroke. A clean buffer still goes on the first press.
+func TestPromptCtrlCExitsThroughTheWarning(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := promptRepl([]string{"one", "two"}, "\x03\x03")
+	r.b.modified = true
+	res := r.readCommand()
+	if res.kind != cmdSubmit || res.line != "x" {
+		t.Fatalf("Ctrl+C at the prompt -> %+v, want the x command", res)
+	}
+	if r.dispatch(res.line) {
+		t.Fatal("one Ctrl+C on a dirty buffer must not exit")
+	}
+	if !r.b.exitArmed {
+		t.Error("Ctrl+C on a dirty buffer should arm the unsaved-changes warning")
+	}
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two"}) {
+		t.Errorf("the buffer changed on the way out: %q", r.b.lines)
+	}
+	// The second press goes.
+	res = r.readCommand()
+	if !r.dispatch(res.line) {
+		t.Error("a second Ctrl+C should exit")
+	}
+	// Clean buffer: one press is enough.
+	r = promptRepl([]string{"one"}, "\x03")
+	res = r.readCommand()
+	if !r.dispatch(res.line) {
+		t.Error("Ctrl+C on a clean buffer should exit at once")
+	}
+}
+
 func TestExpandTabsAndVisualCol(t *testing.T) {
 	cases := []struct {
 		in       string
