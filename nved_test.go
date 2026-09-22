@@ -2060,6 +2060,29 @@ func TestRowsInsertAppendPrependAndShape(t *testing.T) {
 	}
 }
 
+// TestInsertRowOnEmptyBufferFillsPlaceholder covers a brand-new or empty file,
+// which the buffer represents as a single blank line 1. Inserting a row there
+// must fill that placeholder rather than splice a second blank line beside it.
+func TestInsertRowOnEmptyBufferFillsPlaceholder(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{""}, 80, 24)
+	r.structDispatch("ir")
+	if !reflect.DeepEqual(r.b.lines, []string{""}) {
+		t.Fatalf("ir on an empty buffer -> %q, want one blank line", r.b.lines)
+	}
+	if !r.b.modified {
+		t.Error("filling the placeholder should mark the buffer modified")
+	}
+	r.undoAtPrompt()
+	if !reflect.DeepEqual(r.b.lines, []string{""}) {
+		t.Fatalf("undo of ir on an empty buffer -> %q", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("undo should restore the unmodified flag")
+	}
+}
+
 func TestLinesDeleteSingleNoConfirm(t *testing.T) {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
@@ -2302,6 +2325,30 @@ func TestAppendBarePrependAndLongForm(t *testing.T) {
 	r.structDispatch("a 99")
 	if !reflect.DeepEqual(r.b.lines, []string{"a", "b", "x"}) {
 		t.Fatalf("a 99 -> %q", r.b.lines)
+	}
+}
+
+// TestAppendOnEmptyBufferFillsPlaceholder covers a brand-new or empty file,
+// which the buffer represents as a single blank line 1. A bare append there
+// must fill that placeholder rather than land after it, which used to leave a
+// stray blank line at the top of the file.
+func TestAppendOnEmptyBufferFillsPlaceholder(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := appendRepl([]string{""}, "one", "two", ".")
+	r.structDispatch("a")
+	if !reflect.DeepEqual(r.b.lines, []string{"one", "two"}) {
+		t.Fatalf("append on an empty buffer -> %q, want no leading blank line", r.b.lines)
+	}
+	if !r.b.modified {
+		t.Error("filling the placeholder should mark the buffer modified")
+	}
+	r.undoAtPrompt()
+	if !reflect.DeepEqual(r.b.lines, []string{""}) {
+		t.Fatalf("undo of append on an empty buffer -> %q, want the placeholder back", r.b.lines)
+	}
+	if r.b.modified {
+		t.Error("undo should restore the unmodified flag")
 	}
 }
 

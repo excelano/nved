@@ -414,7 +414,11 @@ func (r *repl) headerName(n int) string {
 // column — so it aligns and you can Tab across it; in plain text it is an empty
 // line. It reprints from the new line so you can climb in and fill it.
 func (r *repl) insertRow(arg string) {
+	empty := r.b.isEmpty() // a brand-new or empty file: fill it, don't add a second blank line
 	n := len(r.b.lines)
+	if empty {
+		n = 0
+	}
 	pos := n // 0-based index to insert AT; after the last line == append
 	if arg != "" {
 		m, err := strconv.Atoi(arg)
@@ -427,23 +431,35 @@ func (r *repl) insertRow(arg string) {
 	}
 	blank := r.blankRecord()
 	preMod := r.b.modified
-	lines := make([]string, 0, n+1)
-	lines = append(lines, r.b.lines[:pos]...)
-	lines = append(lines, blank)
-	lines = append(lines, r.b.lines[pos:]...)
-	r.b.lines = lines
+	if empty {
+		r.b.lines = []string{blank}
+	} else {
+		lines := make([]string, 0, n+1)
+		lines = append(lines, r.b.lines[:pos]...)
+		lines = append(lines, blank)
+		lines = append(lines, r.b.lines[pos:]...)
+		r.b.lines = lines
+	}
 	r.b.modified = true
+	delta := -1 // undo removes the inserted line
+	if empty {
+		delta = 0 // filling the placeholder keeps the line count at 1
+	}
 	r.b.pushUndo(undoEntry{
 		apply: func(b *buffer) {
-			out := make([]string, 0, len(b.lines)-1)
-			out = append(out, b.lines[:pos]...)
-			out = append(out, b.lines[pos+1:]...)
-			b.lines = out
+			if empty {
+				b.lines = []string{""}
+			} else {
+				out := make([]string, 0, len(b.lines)-1)
+				out = append(out, b.lines[:pos]...)
+				out = append(out, b.lines[pos+1:]...)
+				b.lines = out
+			}
 			b.modified = preMod
 		},
 		line:      pos,
 		col:       0,
-		lineDelta: -1, // undo removes the inserted line
+		lineDelta: delta,
 	})
 	emit(faint(fmt.Sprintf("rows: inserted a row at line %d", pos+1)) + "\n")
 	r.reprintFrom(pos + 1)
@@ -562,7 +578,11 @@ func isYes(s string) bool {
 // block, the same cancel the save and confirm prompts use. However many lines are
 // typed, the splice is a single undo.
 func (r *repl) appendRows(arg string) {
+	empty := r.b.isEmpty() // a brand-new or empty file: fill it, don't splice beside it
 	n := len(r.b.lines)
+	if empty {
+		n = 0
+	}
 	pos := n // 0-based index to insert AT; after the last line == append
 	if arg != "" {
 		m, err := strconv.Atoi(arg)
@@ -591,22 +611,34 @@ func (r *repl) appendRows(arg string) {
 	count := len(added)
 	preMod := r.b.modified
 	lines := make([]string, 0, n+count)
-	lines = append(lines, r.b.lines[:pos]...)
+	if !empty {
+		lines = append(lines, r.b.lines[:pos]...)
+	}
 	lines = append(lines, added...)
-	lines = append(lines, r.b.lines[pos:]...)
+	if !empty {
+		lines = append(lines, r.b.lines[pos:]...)
+	}
 	r.b.lines = lines
 	r.b.modified = true
+	delta := -count // undo removes the appended lines
+	if empty {
+		delta = -(count - 1) // undo restores the one-line placeholder, not zero lines
+	}
 	r.b.pushUndo(undoEntry{
 		apply: func(b *buffer) {
-			out := make([]string, 0, len(b.lines)-count)
-			out = append(out, b.lines[:pos]...)
-			out = append(out, b.lines[pos+count:]...)
-			b.lines = out
+			if empty {
+				b.lines = []string{""}
+			} else {
+				out := make([]string, 0, len(b.lines)-count)
+				out = append(out, b.lines[:pos]...)
+				out = append(out, b.lines[pos+count:]...)
+				b.lines = out
+			}
 			b.modified = preMod
 		},
 		line:      pos,
 		col:       0,
-		lineDelta: -count, // undo removes the appended lines
+		lineDelta: delta,
 	})
 	word := "line"
 	if count > 1 {
@@ -614,6 +646,8 @@ func (r *repl) appendRows(arg string) {
 	}
 	var msg string
 	switch {
+	case empty:
+		msg = fmt.Sprintf("rows: appended %d %s", count, word)
 	case pos == 0:
 		msg = fmt.Sprintf("rows: prepended %d %s", count, word)
 	case pos == n:

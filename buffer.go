@@ -48,6 +48,15 @@ func (b *buffer) sep() rune {
 	return b.recSep
 }
 
+// isEmpty reports whether the buffer is the placeholder line 1 stands for on a
+// brand-new or empty file (see the buffer doc comment) rather than a real blank
+// line the user typed. A row insert or append into it fills the placeholder in
+// place instead of splicing beside it, so the first line typed doesn't leave a
+// stray blank line behind it.
+func (b *buffer) isEmpty() bool {
+	return len(b.lines) == 1 && b.lines[0] == ""
+}
+
 // reline reinterprets the buffer's bytes under a new record separator: rejoin the
 // current lines on the old separator to recover the byte stream, then re-split on
 // the new one. It is lossless and reversible — relining back to the old separator
