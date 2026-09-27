@@ -304,4 +304,4 @@ backing out of any editor without saving.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Authored by David Anderson, with AI assistance.
+MIT — see [LICENSE](LICENSE).
