@@ -2435,6 +2435,182 @@ func TestEditReentryAfterScrollSmoke(t *testing.T) {
 	}
 }
 
+// --- editor.loop key dispatch -----------------------------------------------
+//
+// The tests below drive e.loop through real key decoding (a scripted byte
+// reader) rather than calling editor methods directly, so the dispatch switch
+// itself — and the methods only it wires up (moveLeft, wordLeft, wordRight,
+// save, paintHeader) — are actually exercised, not just the logic beneath them.
+
+// Byte sequences for the keys loop dispatches on, as a real terminal would send
+// them (see input.go's classifyCSI/readCSI); named for readability at each call
+// site.
+const (
+	kUp        = "\x1b[A"
+	kDown      = "\x1b[B"
+	kRight     = "\x1b[C"
+	kLeft      = "\x1b[D"
+	kCtrlRight = "\x1b[1;5C"
+	kCtrlLeft  = "\x1b[1;5D"
+	kHome      = "\x1b[H"
+	kCtrlHome  = "\x1b[1;5H"
+	kEnd       = "\x1b[F"
+	kCtrlEnd   = "\x1b[1;5F"
+	kPageUp    = "\x1b[5~"
+	kPageDown  = "\x1b[6~"
+	kShiftTab  = "\x1b[Z"
+	kTab       = "\t"
+	kEnter     = "\r"
+	kBackspace = "\x7f"
+	kDelete    = "\x1b[3~"
+	kCtrlU     = "\x15"
+	kCtrlS     = "\x13"
+	kCtrlX     = "\x18"
+	kCtrlC     = "\x03"
+)
+
+// scriptKeys queues a byte sequence on r's reader, as if typed at the keyboard,
+// so a test can drive e.loop (or r.edit) through real key decoding.
+func scriptKeys(t *testing.T, r *repl, s string) {
+	t.Helper()
+	pr, pw, _ := os.Pipe()
+	pw.WriteString(s)
+	pw.Close()
+	r.rd = newReaderFrom(pr)
+}
+
+func TestLoopCharAndWordNav(t *testing.T) {
+	e := newEditor(t, []string{"hello world"}, 0, 0)
+	scriptKeys(t, e.r, kCtrlRight+kRight+kCtrlLeft+kLeft+kHome+kEnd+kCtrlHome+kCtrlEnd+kRight)
+	act := e.loop()
+	if act != actNone {
+		t.Errorf("Right past the last character = %v, want actNone", act)
+	}
+	if e.cx != 11 {
+		t.Errorf("final cx = %d, want 11 (End/Ctrl+End land at line length)", e.cx)
+	}
+}
+
+func TestLoopVerticalNav(t *testing.T) {
+	e := newEditor(t, []string{"a", "b", "c"}, 1, 0)
+	// Up to the top, Up again (no-op there), then Down past the bottom leaves.
+	scriptKeys(t, e.r, kUp+kUp+kDown+kDown+kDown)
+	act := e.loop()
+	if act != actNone {
+		t.Errorf("Down past the last line = %v, want actNone", act)
+	}
+	if e.cy != 2 {
+		t.Errorf("final cy = %d, want 2", e.cy)
+	}
+}
+
+func TestLoopPageUpPageDown(t *testing.T) {
+	// Allowed: a line above the block lets Page-Up leave at once.
+	e := newEditor(t, []string{"a"}, 0, 0)
+	e.start = 5
+	scriptKeys(t, e.r, kPageUp)
+	if act := e.loop(); act != actPageUp {
+		t.Errorf("Page-Up with a line above = %v, want actPageUp", act)
+	}
+
+	// Refused: nothing above the block, so the key is swallowed and the loop
+	// keeps going — proven by the rune typed right after it actually landing.
+	e2 := newEditor(t, []string{"a"}, 0, 0)
+	scriptKeys(t, e2.r, kPageUp+"X")
+	e2.loop()
+	if e2.r.b.lines[0] != "Xa" {
+		t.Errorf("a refused Page-Up should not leave the loop, lines=%q", e2.r.b.lines)
+	}
+
+	// Allowed: a line below the block lets Page-Down leave.
+	e3 := newEditor(t, []string{"a", "b"}, 0, 0)
+	e3.count = 1 // the block only shows line 1; line 2 is pageable
+	scriptKeys(t, e3.r, kPageDown)
+	if act := e3.loop(); act != actPageDown {
+		t.Errorf("Page-Down with a line below = %v, want actPageDown", act)
+	}
+
+	// Refused: nothing below the block.
+	e4 := newEditor(t, []string{"a"}, 0, 0)
+	scriptKeys(t, e4.r, kPageDown+"X")
+	e4.loop()
+	if e4.r.b.lines[0] != "Xa" {
+		t.Errorf("a refused Page-Down should not leave the loop, lines=%q", e4.r.b.lines)
+	}
+}
+
+func TestLoopEditingKeys(t *testing.T) {
+	e := newEditor(t, []string{"ab"}, 0, 0)
+	scriptKeys(t, e.r, "X"+kEnter+kBackspace+kDelete+kTab+kCtrlU+kCtrlC)
+	act := e.loop()
+	if act != actNone {
+		t.Fatalf("trailing Ctrl+C = %v, want actNone", act)
+	}
+	// X inserted, Enter split it, Backspace rejoined it, Delete removed the next
+	// rune, Tab inserted a literal tab (raw mode), Ctrl+U undid that insert.
+	if !reflect.DeepEqual(e.r.b.lines, []string{"Xb"}) {
+		t.Errorf("lines = %q, want [Xb]", e.r.b.lines)
+	}
+	if e.cx != 1 {
+		t.Errorf("cx = %d, want 1", e.cx)
+	}
+}
+
+func TestLoopCtrlX(t *testing.T) {
+	e := newEditor(t, []string{"a"}, 0, 0)
+	scriptKeys(t, e.r, kCtrlX)
+	if act := e.loop(); act != actExit {
+		t.Errorf("Ctrl+X = %v, want actExit", act)
+	}
+}
+
+// TestLoopCtrlSSavesAndFlashesHeader covers save and paintHeader — Ctrl+S writes
+// the named buffer and flashes a confirmation in the header row; the header is
+// only restored (and the flash cleared) on the NEXT key, which this also types,
+// so it lands normally despite the flash.
+func TestLoopCtrlSSavesAndFlashesHeader(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f.txt")
+	e := newEditor(t, []string{"hello"}, 0, 0)
+	e.r.b.name = p
+	scriptKeys(t, e.r, kCtrlS+"X"+kCtrlC)
+	e.loop()
+	// flash was set true by save(), then cleared by the next key (X) — by the
+	// time loop returns it should be false again.
+	if e.flash {
+		t.Error("flash should have been cleared by the key typed after Ctrl+S")
+	}
+	if e.r.b.lines[0] != "Xhello" {
+		t.Errorf("lines = %q, want [Xhello] (X typed after the flash clears)", e.r.b.lines)
+	}
+	got, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello\n" {
+		t.Errorf("saved file = %q, want %q (the buffer before X was typed)", got, "hello\n")
+	}
+}
+
+func TestLoopAlignedKeys(t *testing.T) {
+	e := newAlignedEditor(t, []string{"a,b,c", "d,e,f"}, ',', false, false, 0, 0)
+	scriptKeys(t, e.r, kTab+kCtrlRight+kShiftTab+kCtrlLeft+kDown+kUp+kEnter+","+"Z"+kCtrlC)
+	act := e.loop()
+	if act != actNone {
+		t.Fatalf("trailing Ctrl+C = %v, want actNone", act)
+	}
+	if e.cy != 0 {
+		t.Errorf("cy = %d, want 0 (Down then Up nets to no movement)", e.cy)
+	}
+	if e.count != 2 {
+		t.Errorf("count = %d, want 2 (Enter is a no-op in aligned mode)", e.count)
+	}
+	// The delimiter outside a quoted value is suppressed (structural, raw-mode
+	// only); Z is an ordinary cell edit.
+	if !reflect.DeepEqual(e.r.b.lines, []string{"Za,b,c", "d,e,f"}) {
+		t.Errorf("lines = %q, want [Za,b,c d,e,f]", e.r.b.lines)
+	}
+}
+
 // A zero-width match (e.g. the ^ anchor) replaced with empty text once looped
 // forever: the next-match scan restarted at the same rune. replaceNext must
 // step past a zero-width, no-insert replacement so the stepping terminates.
