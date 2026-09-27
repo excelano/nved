@@ -235,10 +235,10 @@ func (r *repl) printLines(start, end int) { r.printRange(start, end, false) }
 func (r *repl) printColumns(start, end int) { r.printRange(start, end, true) }
 
 // printRange is the shared block print behind printLines and printColumns: refresh
-// the size, cap the range to one screenful, and render aligned (a delimiter is set
-// and every line parses) or raw, recording the block as r.last so a later climb
-// lands on it. ruler asks the aligned path for the column letter ruler; the raw
-// path ignores it, having no columns.
+// the size, cap the range to one screenful, and render aligned (a delimiter is
+// set) or raw, recording the block as r.last so a later climb lands on it. ruler
+// asks the aligned path for the column letter ruler; the raw path ignores it,
+// having no columns.
 func (r *repl) printRange(start, end int, ruler bool) {
 	r.refreshSize()
 	if fit := r.fillDown(start); end > fit {
@@ -246,10 +246,9 @@ func (r *repl) printRange(start, end int, ruler bool) {
 	}
 	out(csiWrapOff)
 	if r.delim != 0 {
-		r.lastAligned = r.printBlockAligned(start, end, ruler) // false when it falls back to raw
+		r.printBlockAligned(start, end, ruler)
 	} else {
 		r.printBlockRaw(start, end)
-		r.lastAligned = false
 	}
 	out(csiWrapOn)
 	r.last = &block{start: start, count: end - start + 1}

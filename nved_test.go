@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -20,7 +21,7 @@ func newEditor(t *testing.T, lines []string, cy, cx int) *editor {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	b := &buffer{lines: append([]string(nil), lines...)}
-	return &editor{r: &repl{b: b, termW: 80, wrap: true}, start: 1, count: len(lines), cy: cy, cx: cx}
+	return &editor{r: &repl{b: b, termW: 80, termH: 24, wrap: true}, start: 1, count: len(lines), cy: cy, cx: cx}
 }
 
 func TestSplitLines(t *testing.T) {
@@ -909,7 +910,7 @@ func newAlignedEditor(t *testing.T, lines []string, delim rune, quotes, headers 
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	b := &buffer{lines: append([]string(nil), lines...)}
-	r := &repl{b: b, termW: 80, delim: delim, quotes: quotes, headers: headers, lastAligned: true, wrap: true}
+	r := &repl{b: b, termW: 80, termH: 24, delim: delim, quotes: quotes, headers: headers, wrap: true}
 	e := &editor{r: r, start: 1, count: len(lines), cy: cy, cx: cx, aligned: true}
 	e.recomputeColW()
 	return e
@@ -1022,7 +1023,7 @@ func newWrapOffEditor(t *testing.T, lines []string, cy, cx int) *editor {
 	screen = io.Discard
 	t.Cleanup(func() { screen = os.Stdout })
 	b := &buffer{lines: append([]string(nil), lines...)}
-	r := &repl{b: b, termW: 80, wrap: false}
+	r := &repl{b: b, termW: 80, termH: 24, wrap: false}
 	return &editor{r: r, start: 1, count: len(lines), cy: cy, cx: cx}
 }
 
@@ -1377,9 +1378,6 @@ func TestPrintLinesWrapOffSmoke(t *testing.T) {
 	if r.last == nil {
 		t.Fatal("wrap-off print should record a climbable block")
 	}
-	if r.lastAligned {
-		t.Error("a plain-text wrap-off block is not aligned")
-	}
 }
 
 func TestPrintLinesAlignedSmoke(t *testing.T) {
@@ -1391,6 +1389,54 @@ func TestPrintLinesAlignedSmoke(t *testing.T) {
 	if r.last == nil || r.last.start != 2 || r.last.count != 2 {
 		t.Fatalf("printLines aligned r.last = %+v, want start=2 count=2", r.last)
 	}
+}
+
+func TestFieldSpansFallbackUnbalancedQuote(t *testing.T) {
+	// A line with a quote that never closes has nowhere to fall back but the whole
+	// line as one raw cell — the same shape rawCellsFallback and the editor's
+	// alignedSpans build on.
+	got := fieldSpansFallback(`"a,b`, ',', true)
+	if len(got) != 1 || got[0].value != `"a,b` || got[0].rawStart != 0 || got[0].rawEnd != 4 {
+		t.Errorf("fieldSpansFallback unbalanced = %+v", got)
+	}
+}
+
+func TestRawCellsFallback(t *testing.T) {
+	if got := rawCellsFallback(`"a,b`, ',', true); !reflect.DeepEqual(got, []string{`"a,b`}) {
+		t.Errorf("rawCellsFallback unbalanced = %q, want one raw cell", got)
+	}
+	// A line that parses cleanly is unaffected — same result as rawCells.
+	if got := rawCellsFallback(`"a,b",c`, ',', true); !reflect.DeepEqual(got, []string{`"a,b"`, "c"}) {
+		t.Errorf("rawCellsFallback ok = %q", got)
+	}
+}
+
+// TestPrintBlockAlignedUnparseableLineStaysClimbable is the regression for #10: a
+// multi-line quoted field used to bail the whole block to a word-wrapped raw view
+// sized as if every line were one row, which could overflow the screen. Now the
+// bad line alone falls back to a raw cell and the block stays aligned (and
+// climbable) throughout.
+func TestPrintBlockAlignedUnparseableLineStaysClimbable(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a,b", `"unterminated,x`, "c,d"}, 80, 24)
+	r.delim, r.quotes = ',', true
+	r.printLines(1, 3)
+	if r.last == nil {
+		t.Fatal("a block with one unparseable line should stay climbable")
+	}
+}
+
+// TestFindHighlightOnUnparseableAlignedLine guards the highlight path in
+// printBlockAligned, which used fieldSpans directly (not the fallback) to map a
+// match's raw range onto the grid — spans came back nil for an unparseable line,
+// and fieldOf(nil, cx) returning -1 panicked on spans[-1].
+func TestFindHighlightOnUnparseableAlignedLine(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a,b", `"unterminated,needle`}, 80, 24)
+	r.delim, r.quotes = ',', true
+	r.findDispatch("find needle") // must not panic
 }
 
 func TestSplitRecords(t *testing.T) {
@@ -2237,6 +2283,155 @@ func TestUndoDoesNotCollapseBlock(t *testing.T) {
 	r.undoAtPrompt()
 	if len(r.b.lines) != 1 || r.b.lines[0] != "foo" {
 		t.Fatalf("prompt undo should rejoin to %q (1 line), got %q (%d lines)", "foo", r.b.lines[0], len(r.b.lines))
+	}
+}
+
+// TestScrollToCursor is the regression for #8: nothing used to bound how far a
+// block could grow, so a mid-edit Enter split that outgrew the terminal height
+// scrolled the block's top off screen for real, desyncing the cursor from the
+// rows it was drawn on. scrollToCursor now caps what a repaint draws (viewHeight)
+// to availRows and keeps the cursor's line inside that window in both
+// directions — including scrolling back up to reveal an earlier line, since a
+// repaint always redraws its fixed on-screen footprint in place rather than
+// relying on real terminal scrollback.
+func TestScrollToCursor(t *testing.T) {
+	e := newEditor(t, []string{"a"}, 0, 1) // cursor at the end of "a"
+	e.r.termH = 6                          // availRows = termH-2 = 4
+	avail := e.r.availRows()
+	for i := 0; i < 8; i++ {
+		e.splitLine() // grows count by one and lands the cursor on the new line
+	}
+	if e.count != 9 {
+		t.Fatalf("count = %d, want 9", e.count)
+	}
+	if h := e.viewHeight(); h > avail {
+		t.Errorf("viewHeight = %d, want <= %d", h, avail)
+	}
+	if row, _ := e.physCursor(); row < 0 || row >= avail {
+		t.Errorf("cursor row = %d, want within [0,%d)", row, avail)
+	}
+	if e.top == 0 {
+		t.Error("a block grown past one screenful should have scrolled (top == 0)")
+	}
+
+	// Moving back to the first line must re-scroll up to reveal it rather than
+	// leaving it stranded above a window that only ever scrolled forward.
+	e.moveTo(0, 0)
+	if e.top != 0 {
+		t.Errorf("top after moving to line 0 = %d, want 0", e.top)
+	}
+	if row, _ := e.physCursor(); row != 0 {
+		t.Errorf("cursor row after moving to line 0 = %d, want 0", row)
+	}
+
+	// Undoing the splits back down below one screenful must snap the window back
+	// to showing the whole (now small) block, not leave it at a stale offset.
+	for i := 0; i < 6; i++ {
+		if act := e.undo(); act != actNone {
+			t.Fatalf("undo %d = %v, want actNone (in-block)", i, act)
+		}
+	}
+	if e.count != 3 {
+		t.Fatalf("count after undoing = %d, want 3", e.count)
+	}
+	if e.top != 0 {
+		t.Errorf("top after shrinking back below one screenful = %d, want 0", e.top)
+	}
+}
+
+// TestScrollToCursorWindowed is TestScrollToCursor's windowed-view twin (wrap
+// off), covering physCursor's other branch: the row offset there is cy-top
+// directly, with no per-line wrapping involved.
+func TestScrollToCursorWindowed(t *testing.T) {
+	e := newWrapOffEditor(t, []string{"a"}, 0, 1)
+	e.r.termH = 6 // availRows = 4
+	avail := e.r.availRows()
+	for i := 0; i < 8; i++ {
+		e.splitLine()
+	}
+	if row, _ := e.physCursor(); row < 0 || row >= avail {
+		t.Errorf("windowed cursor row = %d, want within [0,%d)", row, avail)
+	}
+	if e.top == 0 {
+		t.Error("windowed block grown past one screenful should have scrolled")
+	}
+	e.moveTo(0, 0)
+	if e.top != 0 {
+		t.Errorf("windowed top after moving to line 0 = %d, want 0", e.top)
+	}
+	if row, _ := e.physCursor(); row != 0 {
+		t.Errorf("windowed cursor row after moving to line 0 = %d, want 0", row)
+	}
+}
+
+// TestReeditClimbsFromRealFootprint is the regression for a bug scrollToCursor's
+// fix uncovered: leaving a scrolled editing session used to record only
+// {start, count} in r.last, so a later climb rebuilt a fresh editor with top
+// always 0 and told the re-entry repaint to climb blockHeight rows to reach the
+// block's true first line — a distance that was never actually on screen, since
+// only the scrolled window (fewer rows) was really drawn; the excess would have
+// walked the cursor off the top of the real terminal, which silently clamps
+// there instead of erroring, desyncing every redraw after. block now also
+// carries top, and r.edit seeds the new editor's top from it and climbs by
+// viewHeight (the real on-screen footprint at the moment of leaving), not
+// blockHeight. This drives r.edit for real (not a hand-built stand-in) and
+// checks the actual cursor-up distance in the re-entry repaint's output.
+func TestReeditClimbsFromRealFootprint(t *testing.T) {
+	r := newRepl([]string{"a"}, 80, 6)  // availRows = termH-2 = 4
+	r.last = &block{start: 1, count: 1} // what printLines(1, 1) would have recorded
+	// (not calling printLines: it refreshes termW/termH from the real terminal,
+	// clobbering the small size this test needs)
+
+	pr, pw, _ := os.Pipe()
+	pw.WriteString(strings.Repeat("\r", 8) + "\x03") // grow to 9 lines, then Ctrl+C out
+	pw.Close()
+	r.rd = newReaderFrom(pr)
+	screen = io.Discard
+	r.edit(key{kind: keyUp}, false)
+	if r.last == nil || r.last.top == 0 {
+		t.Fatalf("setup: expected a scrolled block, r.last=%+v", r.last)
+	}
+	wantClimb := r.last.count - r.last.top + 1 // viewHeight (4) + headRows (1)
+
+	pr2, pw2, _ := os.Pipe()
+	pw2.WriteString("\x03") // Ctrl+C out immediately
+	pw2.Close()
+	r.rd = newReaderFrom(pr2)
+	var buf strings.Builder
+	screen = &buf
+	t.Cleanup(func() { screen = os.Stdout })
+	r.edit(key{kind: keyHome, ctrl: true}, false) // the re-entry under test
+
+	m := regexp.MustCompile(`\x1b\[(\d+)A`).FindStringSubmatch(buf.String())
+	if m == nil {
+		t.Fatal("expected a cursor-up escape sequence in the re-entry repaint")
+	}
+	if got, _ := strconv.Atoi(m[1]); got != wantClimb {
+		t.Errorf("re-entry climbed %d rows, want %d (viewHeight+headRows) — climbing blockHeight+headRows (%d) would overshoot the real terminal", got, wantClimb, r.last.count+1)
+	}
+}
+
+// TestEditReentryAfterScrollSmoke drives r.edit end to end, twice, through a
+// scripted key reader: grow a block past one screenful, leave, then climb back
+// in with a different key. It must not panic.
+func TestEditReentryAfterScrollSmoke(t *testing.T) {
+	screen = io.Discard
+	t.Cleanup(func() { screen = os.Stdout })
+	r := newRepl([]string{"a"}, 80, 6)  // availRows = 4
+	r.last = &block{start: 1, count: 1} // what printLines(1, 1) would have recorded
+
+	pr, pw, _ := os.Pipe()
+	pw.WriteString(strings.Repeat("\r", 8) + "\x03" + "\x03")
+	pw.Close()
+	r.rd = newReaderFrom(pr)
+
+	r.edit(key{kind: keyUp}, false) // climb in, type 8 Enters, Ctrl+C out
+	if r.last == nil || r.last.top == 0 {
+		t.Fatalf("first session should leave a scrolled block, r.last=%+v", r.last)
+	}
+	r.edit(key{kind: keyHome, ctrl: true}, false) // climb back in at the top, Ctrl+C out
+	if r.last == nil {
+		t.Fatal("second session should still leave a climbable block")
 	}
 }
 

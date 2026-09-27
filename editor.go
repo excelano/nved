@@ -83,6 +83,14 @@ type editor struct {
 	// climb-in) shows the left edge; the gutter is frozen and never pans.
 	hscroll int
 
+	// top is the vertical twin of hscroll: the 0-based line index of the first
+	// logical line drawn at the top of the visible window, once the block has
+	// grown taller than one screenful. A block never scrolls past its own edges
+	// by growing the on-screen footprint — every repaint redraws the same fixed
+	// physical rows in place — so scrolling top backward to reveal an earlier line
+	// is exactly as valid as scrolling it forward; see scrollToCursor.
+	top int
+
 	// flash is set while a save confirmation occupies the header row; the next
 	// key restores the normal header.
 	flash bool
@@ -114,11 +122,18 @@ const (
 // it, so the editor's layout matches what is already on screen. On return r.last
 // reflects the block's (possibly changed) size.
 func (r *repl) edit(climb key, toMatch bool) editAction {
-	e := &editor{r: r, start: r.last.start, count: r.last.count}
-	e.aligned = r.lastAligned
+	e := &editor{r: r, start: r.last.start, count: r.last.count, top: r.last.top}
+	e.aligned = r.delim != 0
 	if e.aligned {
 		e.recomputeColW()
 	}
+	// The prompt sits directly below whatever was really drawn last time — the
+	// visible window at the top just seeded, not necessarily the whole block, if
+	// the block scrolled during a prior editing session. Snapshot that height
+	// before the climb moves the cursor; scrollToCursor may re-scroll top for the
+	// new cy once repaintAll runs, but this is still the right distance to climb
+	// from, for the same reason repaintAll's own prePhysRow always is.
+	prePhysRow := e.viewHeight()
 
 	switch {
 	case climb.kind == keyLeft:
@@ -139,25 +154,25 @@ func (r *repl) edit(climb key, toMatch bool) editAction {
 		}
 	}
 
-	// Clear the prompt we're climbing out of and take over wrapping. The prompt
-	// sits one physical row below the block, i.e. blockHeight rows below the
-	// top, so repaintAll climbs from there, redraws the block in our layout, and
-	// lands the cursor at its target.
+	// Clear the prompt we're climbing out of and take over wrapping. repaintAll
+	// climbs from prePhysRow, redraws the (possibly re-scrolled) window in our
+	// layout, and lands the cursor at its target.
 	out("\r" + csiEL)
 	out(csiWrapOff)
 	if e.windowed() {
 		e.panToCursor() // a wide last line climbed into at its end starts panned into view
 	}
-	e.repaintAll(e.blockHeight())
+	e.repaintAll(prePhysRow)
 
 	action := e.loop()
 
-	// Drop to the command line directly below the (possibly resized) block,
+	// Drop to the command line directly below the visible window (not the whole
+	// block — a scrolled block's lines above top were never drawn on screen),
 	// clear it, and hand wrapping back to the terminal.
 	curRow, _ := e.physCursor()
-	out(cud(e.blockHeight()-curRow) + "\r" + csiEL)
+	out(cud(e.viewHeight()-curRow) + "\r" + csiEL)
 	out(csiWrapOn)
-	r.last = &block{start: e.start, count: e.count}
+	r.last = &block{start: e.start, count: e.count, top: e.top}
 	return action
 }
 
@@ -361,16 +376,12 @@ func (e *editor) inQuotedValue() bool {
 	return s.quoted && e.cx > s.rawStart && e.cx < s.rawEnd
 }
 
-// alignedSpans is the editor's parse of one line: fieldSpans, but a line that
-// won't parse — a quote left transiently unbalanced mid-edit — falls back to a
-// single span covering the whole line instead of failing. That keeps the cursor
-// math and the render alive while you type the second quote: the line shows as one
-// raw cell until it balances, never crashing and never losing the text.
+// alignedSpans is the editor's parse of one line: fieldSpansFallback, so a line
+// that won't parse — a quote left transiently unbalanced mid-edit — shows as one
+// raw cell instead of failing. That keeps the cursor math and the render alive
+// while you type the second quote, never crashing and never losing the text.
 func (e *editor) alignedSpans(text string) []fieldSpan {
-	if spans, ok := fieldSpans(text, e.r.delim, e.r.quotes); ok {
-		return spans
-	}
-	return []fieldSpan{{0, len([]rune(text)), text, false}}
+	return fieldSpansFallback(text, e.r.delim, e.r.quotes)
 }
 
 // alignedCells is the raw cell text of one line, robust to an unparseable line the
@@ -409,28 +420,85 @@ func (e *editor) lineTopRow(cy int) int {
 	return h
 }
 
-// blockHeight is the total physical height of the block once every line is
-// wrapped.
+// blockHeight is the total physical height of the whole block once every line is
+// wrapped — not just the visible window; see viewHeight for that.
 func (e *editor) blockHeight() int { return e.lineTopRow(e.count) }
 
+// viewTopRow is lineTopRow relative to the visible window's top (e.top) instead
+// of the block's first line — the offset physCursor and the single-line redraw
+// climb by once a block has scrolled.
+func (e *editor) viewTopRow(cy int) int {
+	return e.lineTopRow(cy) - e.lineTopRow(e.top)
+}
+
+// visibleBottom is the last line index that fits under top within one
+// screenful, mirroring fillDown's read-only walk (page.go) but bounded by
+// e.count — and, like visibleTail's read-only twin, always including top itself
+// even if its own height alone overflows.
+func (e *editor) visibleBottom() int {
+	avail := e.r.availRows()
+	used, bot := 0, e.top
+	for j := e.top; j < e.count; j++ {
+		h := e.physHeightOf(j)
+		if j > e.top && used+h > avail {
+			break
+		}
+		used += h
+		bot = j
+	}
+	return bot
+}
+
+// viewHeight is the physical height of the currently visible window — what a
+// repaint actually draws — as opposed to blockHeight's whole-block total.
+func (e *editor) viewHeight() int {
+	bot := e.visibleBottom()
+	return e.viewTopRow(bot) + e.physHeightOf(bot)
+}
+
+// scrollToCursor keeps the cursor's line inside the visible window, the
+// vertical twin of panToCursor: top never sits below cy, and steps forward just
+// enough that cy's line fits within one screenful — always including cy itself
+// even if its own height alone overflows (the same edge case visibleBottom
+// accepts). When the whole block now fits without scrolling, top snaps back to
+// 0, so a block that grew past one screenful and then shrank back below it is
+// shown in full again rather than left showing a stale partial window. It
+// reports whether top changed, the signal that a redraw must repaint the whole
+// (possibly re-scrolled) window rather than hop the cursor in place.
+func (e *editor) scrollToCursor() bool {
+	old := e.top
+	avail := e.r.availRows()
+	if e.blockHeight() <= avail {
+		e.top = 0
+		return e.top != old
+	}
+	if e.top > e.cy {
+		e.top = e.cy
+	}
+	for e.top < e.cy && e.lineTopRow(e.cy)-e.lineTopRow(e.top)+e.physHeightOf(e.cy) > avail {
+		e.top++
+	}
+	return e.top != old
+}
+
 // physCursor maps the logical cursor (cy, cx) to its physical position: the row
-// offset from the top of the block and the 1-based terminal column. It wraps the
-// cursor's line, finds which wrapped row the cursor's visual column lands on, and
-// offsets the column past the gutter. A cursor sitting just off the end of a row
-// (past the wrap width, e.g. on a hanging break space) is clamped to the last
-// terminal column.
+// offset from the top of the VISIBLE WINDOW (top, not necessarily the block's
+// first line) and the 1-based terminal column. It wraps the cursor's line, finds
+// which wrapped row the cursor's visual column lands on, and offsets the column
+// past the gutter. A cursor sitting just off the end of a row (past the wrap
+// width, e.g. on a hanging break space) is clamped to the last terminal column.
 func (e *editor) physCursor() (rowOff, chaCol int) {
 	if e.windowed() {
-		// One row per line, so the row offset is just cy; the column is the cursor's
-		// visual column (aligned-grid or tab-expanded, per the view) less the
-		// horizontal pan, past the gutter.
+		// One row per line, so the row offset is just cy less top; the column is the
+		// cursor's visual column (aligned-grid or tab-expanded, per the view) less
+		// the horizontal pan, past the gutter.
 		chaCol = e.width() + 2 + e.curVisualCol() - e.hscroll + 1
 		if chaCol > e.tw() {
 			chaCol = e.tw()
 		}
-		return e.cy, chaCol
+		return e.cy - e.top, chaCol
 	}
-	base := e.lineTopRow(e.cy)
+	base := e.viewTopRow(e.cy)
 	starts := wrapRows(e.disp(e.cy), e.availWidth())
 	r, col := rowOf(starts, visualCol(e.curLine(), e.cx))
 	chaCol = e.width() + 2 + col + 1
@@ -445,15 +513,20 @@ func (e *editor) physCursor() (rowOff, chaCol int) {
 // moveTo repositions the cursor to (cy, cx), clamping into range. No text
 // changes, so physCursor computed before and after the change agree on the
 // physical layout; the difference gives the relative row move, then an absolute
-// column set. In a windowed view a move that carries the cursor outside the visible
-// window pans the block horizontally instead, which re-windows every row, so it
-// repaints in full rather than emitting a relative cursor hop.
+// column set. A move that carries the cursor outside the visible window scrolls
+// it vertically (scrollToCursor) and/or, in a windowed view, pans it
+// horizontally (panToCursor) instead — either re-windows every row, so it
+// repaints in full rather than emitting a relative cursor hop. Both are checked
+// unconditionally (not short-circuited) since either alone must still take
+// effect when a repaint is already needed for the other.
 func (e *editor) moveTo(cy, cx int) {
 	cy = clamp(cy, 0, e.count-1)
 	cx = clamp(cx, 0, e.lineLen(cy))
 	oldRow, _ := e.physCursor()
 	e.cy, e.cx = cy, cx
-	if e.windowed() && e.panToCursor() {
+	scrolled := e.scrollToCursor()
+	panned := e.windowed() && e.panToCursor()
+	if scrolled || panned {
 		e.repaintAll(oldRow)
 		return
 	}
@@ -914,7 +987,7 @@ func emitLine(w, num int, text string, A, hlLo, hlHi int) {
 // the edit; it climbs from there to the line's top, rewrites the line's rows,
 // then drops to the cursor's new position.
 func (e *editor) redrawLine(prePhysRow int) {
-	lineTop := e.lineTopRow(e.cy)
+	lineTop := e.viewTopRow(e.cy)
 	out(csiHide)
 	out(cuu(prePhysRow - lineTop)) // up to the first row of this line
 	if e.aligned {
@@ -928,21 +1001,29 @@ func (e *editor) redrawLine(prePhysRow int) {
 	out(csiShow)
 }
 
-// repaintAll repaints the whole block after a structural or height-changing
-// edit. prePhysRow is the cursor's physical row before the edit; it climbs from
-// there past the block's top to the faint header row one line above it, rewrites
-// the header (so the line counts stay live as edits add or remove lines) and
-// every wrapped line, erases anything a now-shorter block left stranded below,
-// then drops to the cursor. Because the rewrite ends with the cursor physically
-// below the block, the final upward move is immune to any scroll it triggered.
+// repaintAll repaints the visible window after a structural or height-changing
+// edit. It first calls scrollToCursor to settle top for the edit that just
+// happened, so every caller gets a correctly re-scrolled window for free rather
+// than having to remember to call it. prePhysRow is the cursor's physical row
+// before the edit, relative to the OLD top; that is still the right distance to
+// climb, because a block's on-screen footprint never moves — every repaint
+// redraws the same fixed physical rows in place, just with a possibly different
+// slice of logical lines, so it climbs from there past the window's top to the
+// faint header row one line above it, rewrites the header (scoped to the lines
+// actually shown, matching the read-only print's header) and every visible
+// line, erases anything a now-shorter window left stranded below, then drops to
+// the cursor. Because the rewrite ends with the cursor physically below the
+// window, the final upward move is immune to any scroll it triggered.
 func (e *editor) repaintAll(prePhysRow int) {
+	e.scrollToCursor()
+	bot := e.visibleBottom()
 	out(csiHide)
-	out(cuu(prePhysRow+e.headRows()) + "\r") // up past the block to the status row
-	out(csiEL + e.r.header(e.start, e.start+e.count-1) + "\r\n")
+	out(cuu(prePhysRow+e.headRows()) + "\r") // up past the window to the status row
+	out(csiEL + e.r.header(e.start+e.top, e.start+bot) + "\r\n")
 	if e.sticky() { // the pinned column header, redrawn so it tracks the grid
 		e.emitAligned(1, e.r.b.lines[0])
 	}
-	for j := 0; j < e.count; j++ {
+	for j := e.top; j <= bot; j++ {
 		if e.aligned {
 			e.emitAligned(e.start+j, e.lineText(j))
 		} else {
@@ -951,7 +1032,7 @@ func (e *editor) repaintAll(prePhysRow int) {
 	}
 	out(csiED) // erase the rows a shrink would otherwise strand
 	targetRow, targetCol := e.physCursor()
-	out(cuu(e.blockHeight()-targetRow) + cha(targetCol))
+	out(cuu(e.viewHeight()-targetRow) + cha(targetCol))
 	out(csiShow)
 }
 

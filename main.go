@@ -79,14 +79,6 @@ type repl struct {
 	// is independent of the DSV layer — orthogonal to delim/quotes/headers.
 	wrap bool
 
-	// lastAligned records whether the last printed block rendered as aligned
-	// columns (delimiter set and every line parsed) rather than raw text. The
-	// editor reads it to choose aligned vs. raw geometry on a climb, and the climb
-	// gate uses it so a delimiter set on an un-alignable block (a multi-line
-	// quoted field shown raw) stays read-only rather than climbing into a view
-	// whose geometry the editor can't reproduce.
-	lastAligned bool
-
 	// search is the armed find/replace, nil when none. It survives between
 	// commands so `find next` can step from the current match and the print path
 	// can highlight it; see search.go.
@@ -107,9 +99,15 @@ type repl struct {
 
 // block records a printed range so a later climb knows where on screen the
 // editable lines are: the 1-based buffer line at the top and how many rows.
+// top is the editor's scroll offset (see editor.top) at the moment the block was
+// last drawn — 0 for an ordinary read-only print (always drawn in full) or an
+// editing session that never outgrew one screenful. A climb back into a block
+// that DID scroll needs it to know how many rows are really on screen right now,
+// since count alone would overstate it.
 type block struct {
 	start int
 	count int
+	top   int
 }
 
 // cmdResult is what one trip through readCommand produces.
@@ -328,7 +326,7 @@ func (r *repl) readCommand() cmdResult {
 	// nav reports whether a climb/page should fire now: an empty line, or the
 	// untouched armed seed.
 	nav := func() bool { return len(line) == 0 || armed }
-	climbable := func() bool { return r.last != nil && (r.delim == 0 || r.lastAligned) }
+	climbable := func() bool { return r.last != nil }
 	for {
 		k, ok := r.rd.readKey()
 		if !ok {
@@ -381,11 +379,9 @@ func (r *repl) readCommand() cmdResult {
 			out(string(k.r))
 			armed = false
 		case keyUp, keyLeft:
-			// Climb into the block to edit it: plain text always, or an aligned DSV
-			// block (the editor reproduces the aligned geometry). A delimiter set on
-			// an un-alignable block — a multi-line quoted field shown raw — stays
-			// read-only, since the on-screen raw view isn't what the editor draws.
-			// Off an armed seed the climb lands on the search match (toMatch).
+			// Climb into the block to edit it: plain text, or an aligned DSV block
+			// (the editor reproduces the aligned geometry). Off an armed seed the
+			// climb lands on the search match (toMatch).
 			if nav() && climbable() {
 				return cmdResult{kind: cmdClimb, climb: k, toMatch: armed}
 			}

@@ -224,9 +224,10 @@ type fieldSpan struct {
 // scans quote-aware: a delimiter inside quotes is part of the field, and a ""
 // pair decodes to one quote in value. ok is false on an unbalanced quote — a
 // field whose value runs onto the next buffer line — or on a quoted field
-// followed by stray text, so callers fall back to the raw view
-// rather than trust a malformed parse. It targets well-formed CSV/TSV/DSV; it
-// does not chase every encoding/csv leniency on malformed input.
+// followed by stray text, so a caller falls back rather than trust a malformed
+// parse: fieldSpansFallback for a single raw cell, or rawCells's ok for a
+// structural edit to abort untouched. It targets well-formed CSV/TSV/DSV; it does
+// not chase every encoding/csv leniency on malformed input.
 func fieldSpans(line string, delim rune, quotes bool) (spans []fieldSpan, ok bool) {
 	rs := []rune(line)
 	n := len(rs)
@@ -286,6 +287,17 @@ func fieldSpans(line string, delim rune, quotes bool) (spans []fieldSpan, ok boo
 		break
 	}
 	return spans, true
+}
+
+// fieldSpansFallback is fieldSpans with a fallback for a line that won't parse —
+// an unbalanced quote, typically a multi-line quoted field or a quote left
+// transiently unbalanced mid-edit — so a caller renders and edits it as one raw
+// cell instead of failing outright.
+func fieldSpansFallback(line string, delim rune, quotes bool) []fieldSpan {
+	if spans, ok := fieldSpans(line, delim, quotes); ok {
+		return spans
+	}
+	return []fieldSpan{{0, len([]rune(line)), line, false}}
 }
 
 // colWidths sizes each column to its widest cell across the given rows. The
@@ -401,7 +413,8 @@ func window(width, hscroll, avail int) (left bool, lo, hi int, right bool) {
 // the climbed-in view, so the two are identical and a quoted field reads as
 // quoted. It shares the fieldSpans parse, so display, column widths, and cursor
 // navigation all agree on where every field begins. ok is false on an unparseable
-// line (an unbalanced quote), the signal to fall back to a raw, unaligned view.
+// line (an unbalanced quote) — the signal a structural edit uses to abort the
+// whole buffer-wide operation untouched rather than trust a malformed parse.
 func rawCells(line string, delim rune, quotes bool) ([]string, bool) {
 	spans, ok := fieldSpans(line, delim, quotes)
 	if !ok {
@@ -413,6 +426,19 @@ func rawCells(line string, delim rune, quotes bool) ([]string, bool) {
 		cells[i] = string(rs[s.rawStart:s.rawEnd])
 	}
 	return cells, true
+}
+
+// rawCellsFallback is rawCells with fieldSpansFallback's single-cell fallback, so
+// every line yields cells for display — an unparseable line renders as one raw
+// cell rather than forcing its caller to bail.
+func rawCellsFallback(line string, delim rune, quotes bool) []string {
+	spans := fieldSpansFallback(line, delim, quotes)
+	rs := []rune(line)
+	cells := make([]string, len(spans))
+	for i, s := range spans {
+		cells[i] = string(rs[s.rawStart:s.rawEnd])
+	}
+	return cells
 }
 
 // fieldOf reports which field a raw cursor index cx sits in. Field boundaries are
@@ -452,10 +478,13 @@ func alignedVisualCol(spans []fieldSpan, colW []int, gapW, cx int) int {
 // printBlockAligned renders [start,end] as aligned columns: the faint status row,
 // an optional pinned-and-faint header (buffer line 1, when it has scrolled off),
 // then each row padded to the block's column grid and truncated at the right edge
-// with a faint ›. If any line won't parse (a multi-line quoted field), it bails to
-// a raw view with a notice — it never paints a grid it can't stand behind, and
-// returns false so the caller marks the block un-alignable (not climbable).
-func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
+// with a faint ›. A line that won't parse (a multi-line quoted field, or a quote
+// left transiently unbalanced) renders as a single raw cell — rawCellsFallback,
+// the same fallback the climbed-in editor uses — rather than bailing the whole
+// block to an unaligned, word-wrapped view: that kept the block one row per line
+// honest in the ordinary case but could overflow the screen in the fallback one,
+// since physHeight always assumes one row per line once a delimiter is set.
+func (r *repl) printBlockAligned(start, end int, ruler bool) {
 	w := r.gutterW()
 	avail := r.termW - (w + 2)
 	if avail < 1 {
@@ -464,23 +493,13 @@ func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
 
 	rows := make([][]string, 0, end-start+1)
 	for i := start; i <= end; i++ {
-		cells, ok := rawCells(r.b.lines[i-1], r.delim, r.quotes)
-		if !ok {
-			r.printBlockRawNotice(start, end)
-			return false
-		}
-		rows = append(rows, cells)
+		rows = append(rows, rawCellsFallback(r.b.lines[i-1], r.delim, r.quotes))
 	}
 
 	showSticky := r.headers && start > 1
 	var headerFields []string
 	if showSticky {
-		hf, ok := rawCells(r.b.lines[0], r.delim, r.quotes)
-		if !ok {
-			r.printBlockRawNotice(start, end)
-			return false
-		}
-		headerFields = hf
+		headerFields = rawCellsFallback(r.b.lines[0], r.delim, r.quotes)
 	}
 
 	// Size columns over the block plus the header line, so the pinned header
@@ -514,14 +533,13 @@ func (r *repl) printBlockAligned(start, end int, ruler bool) bool {
 		// reverse-video span sits under the very characters that matched.
 		hlLo, hlHi := 0, 0
 		if lo, hi, ok := r.matchRange(num); ok {
-			spans, _ := fieldSpans(r.b.lines[num-1], r.delim, r.quotes)
+			spans := fieldSpansFallback(r.b.lines[num-1], r.delim, r.quotes)
 			gw := gapWidth(r.delim)
 			hlLo = alignedVisualCol(spans, colW, gw, lo)
 			hlHi = alignedVisualCol(spans, colW, gw, hi)
 		}
 		emitWindowedRow(w, num, 0, avail, text, sep, dim, hlLo, hlHi)
 	}
-	return true
 }
 
 // emitRuler prints the faint column-letter ruler: a blank gutter (so it column-
@@ -611,11 +629,4 @@ func emitWindowedRow(w, num, hscroll, avail int, display string, sep []bool, dim
 		row += faint("›")
 	}
 	out("\r" + csiEL + row + "\r\n")
-}
-
-// printBlockRawNotice prints a one-line reason and then the block as plain text —
-// the graceful degrade when a block can't be aligned honestly.
-func (r *repl) printBlockRawNotice(start, end int) {
-	out("\r" + csiEL + faint("dsv: unbalanced quote — multi-line field, showing raw") + "\r\n")
-	r.printBlockRaw(start, end)
 }
