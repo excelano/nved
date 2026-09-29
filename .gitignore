@@ -14,3 +14,4 @@ go.work.sum
 # Scratch fixtures used while dogfooding
 /test_files/
 ship.toml
+/dist/
