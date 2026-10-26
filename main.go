@@ -1,9 +1,11 @@
-// Command nved is a REPL-flavored terminal text editor — "new ved".
-//
-// Slice 2: the editor core. On top of slice 1's command REPL it adds climbing
-// into the most-recently-printed block to edit it in place — cursor movement,
-// insert, Enter-split, Backspace/Delete-join — with ANSI block redraw over the
-// real (scrolling) terminal rather than an alternate screen.
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
+// Command nved is a REPL-flavored terminal text editor — "new ved". A command
+// REPL prints blocks of the file; climbing into the most-recently-printed block
+// edits it in place — cursor movement, insert, Enter-split,
+// Backspace/Delete-join — with ANSI block redraw over the real (scrolling)
+// terminal rather than an alternate screen.
 package main
 
 import (

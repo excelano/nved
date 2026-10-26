@@ -75,7 +75,7 @@ cd nved
 go build -o nved .
 ```
 
-Requires Go 1.25 or newer.
+`go.mod` names the Go toolchain it needs.
 
 ## How it works
 
