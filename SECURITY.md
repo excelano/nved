@@ -8,7 +8,7 @@ Please do not open public issues for security problems.
 
 ## Supported versions
 
-The latest release receives security fixes. Older versions are not supported.
+The latest release receives security fixes. Older versions are not supported. A fix ships in a new release; update the way you installed.
 
 ## What nved can access
 
@@ -16,7 +16,7 @@ nved is a text editor that runs locally on your machine. It reads the file you o
 
 ## What nved stores
 
-Undo history and scrollback live in memory only and are gone when you exit. nved writes no configuration file, no command history, and no cache anywhere on disk; the sole thing it ever writes is the file you explicitly save, with the normal `0644` file mode. The only third-party dependencies are `golang.org/x/term` and `golang.org/x/sys` (both maintained under the Go project) for raw-mode terminal handling.
+Undo history and scrollback live in memory only and are gone when you exit. nved writes no configuration file, no command history, and no cache anywhere on disk; the sole thing it ever writes is the file you explicitly save, with the normal `0644` file mode. The third-party dependencies are `golang.org/x/term` and `golang.org/x/sys` (both maintained under the Go project) for raw-mode terminal handling, and `github.com/excelano/encsniff-go` (from the same author as nved) for detecting a file's text encoding on open.
 
 ## Verifying releases
 

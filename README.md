@@ -137,7 +137,7 @@ The printed block sits just above the prompt. Climb into it to edit:
 - **Ctrl+S** saves in place without leaving (your cursor stays put); **Ctrl+X** exits — the save and exit chords work while editing, just as at the prompt.
 - Leave the editor with **Esc** or **Ctrl+C**, or by stepping off the bottom (**Down**) or off the end of the last line (**Right**) — the mirror of how you climbed in.
 
-Three structural edits are typed at the prompt rather than done with the cursor.
+Structural edits are typed at the prompt rather than done with the cursor.
 `append [N]` — short `a`, taken from ved — reads the lines you type and adds them
 after line N, one per Enter, until a line that is nothing but a period ends the
 run:
@@ -165,7 +165,7 @@ answers to `kill row N` (`kr`) as well, the spelling that names its axis the way
 the column commands do. Deleting a range asks first; deleting a single line does
 not. `insert row [N]` — short `ir` — opens a single blank line after line N to
 climb into, which in a delimited view is a well-formed empty record with one
-field per column. Each of the three is a single **Ctrl+U** undo however many
+field per column. Each is a single **Ctrl+U** undo however many
 lines it moved, and a bare `rows` reports the line count.
 
 Long lines are word-wrapped by nved itself, with a continuation indent that lines
@@ -252,7 +252,7 @@ plain cell, quote it first by typing `"` at each end.
 
 Whole columns and rows are edited by command rather than from inside a cell.
 Columns have no line number, so `columns` (or `c`) prints a faint letter ruler above
-the grid, labelling them `A`, `B`, `C`… from the left the way a spreadsheet does;
+the grid, labeling them `A`, `B`, `C`… from the left the way a spreadsheet does;
 `insert column [L]` — short `ic` — adds an empty column before column L (a bare
 `insert column` appends, `ic A` prepends), and `kill column L` (`kc`) removes column
 L from every row after a confirmation, naming the column when headers are on. Row insert and
@@ -268,8 +268,9 @@ cells are quoted and which aren't.
 ## Input encoding
 
 nved expects UTF-8. If the file looks like UTF-7 (the `+ACI-` escape that
-Scoutbook exports emit) or carries a UTF-16 BOM, nved prints a warning at
-startup with the `iconv` command needed to convert it. To avoid silently
+Scoutbook exports emit) or UTF-16, nved prints a warning at startup naming the
+encoding, with a hint for converting it. A file that is not valid UTF-8 and
+matches no known encoding gets a warning saying so. To avoid silently
 corrupting a non-UTF-8 source by saving edits as UTF-8, `s` (save) refuses to
 overwrite the original file in that case — `s <newname>` to a different file
 still works, so you can dump the buffer somewhere else and then convert.
