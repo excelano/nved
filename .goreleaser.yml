@@ -6,9 +6,8 @@
 #   goreleaser release --snapshot --clean
 # Snapshots produce binaries in ./dist/ without touching GitHub.
 #
-# Cross-platform: linux, darwin, and windows. apt only consumes the linux
-# .debs; the darwin tarballs and the windows zip are a convenience for
-# source-free installs. Terminal input is portable Go (a reader goroutine, not
+# Linux and Windows. apt consumes the linux .debs and winget the windows zip.
+# Terminal input is portable Go (a reader goroutine, not
 # unix.Poll), and console_windows.go switches the Windows console into ANSI
 # mode at startup.
 
@@ -26,7 +25,6 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
       - windows
     goarch:
       - amd64
