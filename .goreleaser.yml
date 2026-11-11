@@ -1,3 +1,6 @@
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+#
 # goreleaser configuration, run by build-release (excelano/shipping) from a
 # tagged commit. To test locally (optional):
 #   goreleaser release --snapshot --clean
@@ -73,19 +76,3 @@ checksum:
 release:
   draft: false
   prerelease: auto
-
-brews:
-  - name: nved
-    repository:
-      owner: excelano
-      name: homebrew-tap
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
-    homepage: "https://excelano.com/nved/"
-    description: "Terminal text editor that edits in your scrollback like a REPL"
-    license: "MIT"
-    install: |
-      bin.install "nved"
-    test: |
-      system "#{bin}/nved", "--version"
