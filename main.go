@@ -29,8 +29,7 @@ func sniffAndWarn(path string) string {
 		return ""
 	}
 	// Two shapes of warning. A signature match can name the encoding; a window
-	// that is merely not valid UTF-8 cannot, and saying so plainly beats the old
-	// behaviour, which called the file usable and let the read fail later.
+	// that is merely not valid UTF-8 cannot.
 	if s.Encoding != "" {
 		fmt.Fprintf(os.Stderr, "nved: warning: %s appears to be %s encoded.\n", path, s.Encoding)
 	} else {
